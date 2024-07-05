@@ -1,0 +1,3 @@
+[submodule "simulacra-aesthetic-models"]
+	path = simulacra-aesthetic-models
+	url = https://github.com/crowsonkb/simulacra-aesthetic-models.git
