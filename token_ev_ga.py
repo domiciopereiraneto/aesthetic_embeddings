@@ -52,9 +52,11 @@ def generate_image_from_embeddings(token_vector, num_inference_steps=50, guidanc
     latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device=device)
     scheduler.set_timesteps(num_inference_steps)
     for t in scheduler.timesteps:
-        noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings)["sample"]
+        with torch.no_grad():
+            noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings)["sample"]
         latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
-    image = vae.decode(latents / 0.18215).sample
+    with torch.no_grad():
+        image = vae.decode(latents / 0.18215).sample
     image = (image / 2 + 0.5).clamp(0, 1)
     image = image.cpu().permute(0, 2, 3, 1).numpy()[0]
     return image
