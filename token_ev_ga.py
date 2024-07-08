@@ -10,8 +10,8 @@ from io import BytesIO
 import simulacra_rank_image
 import copy
 
-CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.8, 0.2, 0.2
-NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE = 100, 10, 3
+CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.2, 0.05
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE = 100, 50, 3
 LAMBDA = 0.1
 
 # Check if a GPU is available and if not, use the CPU
@@ -26,7 +26,7 @@ scheduler = PNDMScheduler.from_pretrained("CompVis/stable-diffusion-v1-4", subfo
 
 aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
-SEED = 42
+SEED = 1234
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
 
@@ -55,7 +55,7 @@ def aesthetic_evaluation(image):
     return aesthetic_score.item()
 
 # Function to generate an image from text embeddings
-def generate_image_from_embeddings(token_vector, num_inference_steps=25, guidance_scale=7.5):
+def generate_image_from_embeddings(token_vector, num_inference_steps=25):
     tmp_token_vector = np.insert(token_vector.cpu().detach().numpy().flatten(), 0, START_OF_TEXT)
     tmp_token_vector = np.append(tmp_token_vector, END_OF_TEXT)
     tmp_token_vector = torch.tensor(tmp_token_vector, dtype=torch.int64).to(device)
@@ -109,9 +109,9 @@ def mutExponential(individual, lambd, low, up, indpb):
                 individual[i] = up
     return individual,
 
-toolbox.register("mate", tools.cxTwoPoint)
-#toolbox.register("mutate", tools.mutUniformInt, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
-toolbox.register("mutate", mutExponential, lambd=LAMBDA, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
+toolbox.register("mate", tools.cxOnePoint)
+toolbox.register("mutate", tools.mutUniformInt, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
+#toolbox.register("mutate", mutExponential, lambd=LAMBDA, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
 toolbox.register("select", tools.selTournament, tournsize=TOURNMENT_SIZE)
 toolbox.register("evaluate", evaluate)
 
