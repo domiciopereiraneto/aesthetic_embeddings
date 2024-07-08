@@ -40,7 +40,7 @@ def aesthetic_evaluation(image):
     return random.uniform(0, 1)
 
 # Function to generate an image from text embeddings
-def generate_image_from_embeddings(token_vector, num_inference_steps=50, guidance_scale=7.5):
+def generate_image_from_embeddings(token_vector, num_inference_steps=25, guidance_scale=7.5):
     tmp_token_vector = np.insert(token_vector.cpu().detach().numpy().flatten(), 0, START_OF_TEXT)
     tmp_token_vector = np.append(tmp_token_vector, END_OF_TEXT)
     tmp_token_vector = torch.tensor(tmp_token_vector, dtype=torch.int64).to(device)
