@@ -3,7 +3,7 @@ from torch.nn import functional as F
 from torchvision import transforms
 from torchvision.transforms import functional as TF
 import torch
-from simulacra_fit_linear_model import AestheticMeanPredictionLinearModel
+from simulacra_aesthetic_models.simulacra_fit_linear_model import AestheticMeanPredictionLinearModel
 from CLIP import clip
 
 class SimulacraAesthetic():
@@ -19,7 +19,7 @@ class SimulacraAesthetic():
 
         self.model = AestheticMeanPredictionLinearModel(512)
         self.model.load_state_dict(
-            torch.load("models/sac_public_2022_06_29_vit_b_16_linear.pth")
+            torch.load("simulacra_aesthetic_models/models/sac_public_2022_06_29_vit_b_16_linear.pth")
         )
         self.model = self.model.to(self.device)
 

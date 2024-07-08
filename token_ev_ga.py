@@ -1,16 +1,21 @@
 import torch
 import numpy as np
+import pandas as pd
 from transformers import CLIPTextModel, CLIPTokenizer
 from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler, StableDiffusionPipeline
 from deap import base, creator, tools, algorithms
 import random
 from PIL import Image
 from io import BytesIO
+import simulacra_rank_image
+import copy
 
-NUM_GENERATIONS, CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 10, 0.5, 0.2, 0.2
+CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.8, 0.2, 0.2
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE = 100, 10, 3
+LAMBDA = 0.1
 
 # Check if a GPU is available and if not, use the CPU
-device = "cuda" if torch.cuda.is_available() else "cpu"
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # Load the components of the Stable Diffusion pipeline
 vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae").to(device)
@@ -18,6 +23,17 @@ tokenizer = CLIPTokenizer.from_pretrained("CompVis/stable-diffusion-v1-4", subfo
 text_encoder = CLIPTextModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="text_encoder").to(device)
 unet = UNet2DConditionModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="unet").to(device)
 scheduler = PNDMScheduler.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="scheduler")
+
+aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
+
+SEED = 42
+generator = torch.Generator(device=device)
+generator.manual_seed(SEED)
+
+num_channels_latents = unet.in_channels
+height = 512
+width = 512
+latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device=device, generator=generator, requires_grad=False)
 
 MIN_VALUE, MAX_VALUE = 0, tokenizer.vocab_size-3
 START_OF_TEXT, END_OF_TEXT = tokenizer.bos_token_id, tokenizer.eos_token_id
@@ -35,9 +51,8 @@ pipeline = pipeline.to(device)
 
 # Define the aesthetic evaluation function
 def aesthetic_evaluation(image):
-    # Dummy function, replace with actual aesthetic evaluation logic
-    # Here, we simply return a random score for demonstration
-    return random.uniform(0, 1)
+    aesthetic_score = aesthetic_model.predict(image)
+    return aesthetic_score.item()
 
 # Function to generate an image from text embeddings
 def generate_image_from_embeddings(token_vector, num_inference_steps=25, guidance_scale=7.5):
@@ -46,19 +61,16 @@ def generate_image_from_embeddings(token_vector, num_inference_steps=25, guidanc
     tmp_token_vector = torch.tensor(tmp_token_vector, dtype=torch.int64).to(device)
     tmp_token_vector = torch.clamp(tmp_token_vector, MIN_VALUE, MAX_VALUE).view(1, len(tmp_token_vector)).to(device)
     text_embeddings = text_encoder(tmp_token_vector)[0]
-    height = 512
-    width = 512
-    num_channels_latents = unet.in_channels
-    latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device=device)
     scheduler.set_timesteps(num_inference_steps)
+    tmp_latens = copy.deepcopy(latents)
     for t in scheduler.timesteps:
         with torch.no_grad():
-            noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings)["sample"]
-        latents = scheduler.step(noise_pred, t, latents)["prev_sample"]
+            noise_pred = unet(tmp_latens, t, encoder_hidden_states=text_embeddings)["sample"]
+        tmp_latens = scheduler.step(noise_pred, t, tmp_latens)["prev_sample"]
     with torch.no_grad():
-        image = vae.decode(latents / 0.18215).sample
-    image = (image / 2 + 0.5).clamp(0, 1)
-    image = image.cpu().permute(0, 2, 3, 1).numpy()[0]
+        image = vae.decode(tmp_latens / 0.18215).sample
+    image = (image / 2 + 0.5).clamp(0, 1).squeeze()
+    image = (image.permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
     return image
 
 # Tokenize and encode the initial prompt
@@ -80,15 +92,37 @@ def evaluate(individual):
     score = aesthetic_evaluation(image)
     return score,
 
+# Registering exponential mutation for integers
+def mutExponential(individual, lambd, low, up, indpb):
+    for i in range(len(individual)):
+        if random.random() < indpb:
+            # Draw a number from an exponential distribution and add it to the gene
+            delta = 1 + random.expovariate(lambd)
+            # Randomly decide if the delta should be positive or negative
+            if random.random() < 0.5:
+                delta = -delta
+            individual[i] += int(round(delta))
+            # Ensure the mutated value is within bounds
+            if individual[i] < low:
+                individual[i] = low
+            elif individual[i] > up:
+                individual[i] = up
+    return individual,
+
 toolbox.register("mate", tools.cxTwoPoint)
-toolbox.register("mutate", tools.mutUniformInt, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
-toolbox.register("select", tools.selTournament, tournsize=3)
+#toolbox.register("mutate", tools.mutUniformInt, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
+toolbox.register("mutate", mutExponential, lambd=LAMBDA, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
+toolbox.register("select", tools.selTournament, tournsize=TOURNMENT_SIZE)
 toolbox.register("evaluate", evaluate)
 
 def main():
     random.seed(42)
-    population = toolbox.population(n=20)
+    population = toolbox.population(n=POP_SIZE)
 
+    max_fit_list = []
+    avg_fit_list = []
+    best_list = []
+    prompt_list = []
     for gen in range(NUM_GENERATIONS):
         offspring = toolbox.select(population, len(population))
         offspring = list(map(toolbox.clone, offspring))
@@ -112,7 +146,23 @@ def main():
         population[:] = offspring
 
         fits = [ind.fitness.values[0] for ind in population]
-        print(f"Gen {gen}: Max fitness {max(fits)}, Avg fitness {sum(fits) / len(fits)}")
+        max_fit = max(fits)
+        avg_fit = sum(fits) / len(fits)
+        print(f"Gen {gen}: Max fitness {max_fit}, Avg fitness {avg_fit}")
+
+        # Generate and display the best image
+        best_ind = tools.selBest(population, 1)[0]
+        prompt = detokenize(best_ind)
+
+        max_fit_list.append(max_fit)
+        avg_fit_list.append(avg_fit)
+        best_list.append(best_ind)
+        prompt_list.append(prompt)
+
+        best_text_embeddings = torch.tensor(best_ind, device=device).unsqueeze(0)
+        best_image = generate_image_from_embeddings(best_text_embeddings)
+        pil_image = Image.fromarray((best_image))
+        pil_image.save("results/best_%d.png" % (gen+1))
 
     best_ind = tools.selBest(population, 1)[0]
     print("Best individual is %s, with fitness: %s" % (best_ind, best_ind.fitness.values))
@@ -120,8 +170,18 @@ def main():
     # Generate and display the best image
     best_text_embeddings = torch.tensor(best_ind, device=device).unsqueeze(0)
     best_image = generate_image_from_embeddings(best_text_embeddings)
-    pil_image = Image.fromarray((best_image * 255).astype(np.uint8))
-    pil_image.show()
+    pil_image = Image.fromarray((best_image))
+    pil_image.save("results/best_all.png")
+
+    pd.DataFrame({"generation": list(range(1,NUM_GENERATIONS+1)), "best_fitness": max_fit_list, "average_fitness": avg_fit_list,
+                  "best_individual": best_list, "prompt": prompt_list}).to_csv("results/fitness_results.csv", index=False)
+
+def detokenize(individual):
+    tmp_solution = torch.tensor(individual, dtype=torch.int64)
+    tmp_solution = torch.clamp(tmp_solution, 0, tokenizer.vocab_size - 1)
+    decoded_string = tokenizer.decode(tmp_solution, skip_special_tokens=True, clean_up_tokenization_spaces = True)
+
+    return decoded_string
 
 if __name__ == "__main__":
     main()
