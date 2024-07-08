@@ -1,3 +1,6 @@
 [submodule "simulacra-aesthetic-models"]
 	path = simulacra-aesthetic-models
 	url = https://github.com/crowsonkb/simulacra-aesthetic-models.git
+[submodule "CLIP"]
+	path = CLIP
+	url = https://github.com/openai/CLIP.git
