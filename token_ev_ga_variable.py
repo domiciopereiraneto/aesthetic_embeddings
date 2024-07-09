@@ -10,8 +10,8 @@ from io import BytesIO
 import simulacra_rank_image
 import copy
 
-CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB, SIZE_MUTATION_PROB = 0.7, 0.2, 0.05, 0.2
-NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE = 20, 20, 3
+CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB, SIZE_MUTATION_PROB = 0.7, 0.2, 0.1, 0.8
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE = 100, 50, 3
 LAMBDA = 0.1
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -35,6 +35,9 @@ latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device
 
 START_OF_TEXT, END_OF_TEXT = tokenizer.bos_token_id, tokenizer.eos_token_id
 MIN_VALUE, MAX_VALUE = 0, tokenizer.vocab_size-1
+
+INITIAL_MAX_SIZE = int(round(tokenizer.model_max_length/2))
+MIN_SIZE, MAX_SIZE = 2, tokenizer.model_max_length-2
 
 pipeline = StableDiffusionPipeline(
     vae=vae,
@@ -80,7 +83,7 @@ toolbox.register("attr_int", random.randint, MIN_VALUE, MAX_VALUE)
 
 # Custom function to create an individual with variable length
 def create_individual():
-    length = random.randint(2, tokenizer.model_max_length - 2)
+    length = random.randint(2, INITIAL_MAX_SIZE)
     return creator.Individual([random.randint(MIN_VALUE, MAX_VALUE) for _ in range(length)])
 
 toolbox.register("individual", create_individual)
@@ -94,11 +97,12 @@ def evaluate(individual):
 
 def mutExponential(individual, lambd, low, up, indpb):
     if random.random() < SIZE_MUTATION_PROB:
-        if random.random() < 0.5:
-            if len(individual) > 2:
+        if random.random() < len(individual)/MAX_SIZE:
+            if len(individual) > MIN_SIZE:
                 del individual[random.randint(0, len(individual) - 1)]
         else:
-            individual.insert(random.randint(0, len(individual)), random.randint(low, up))
+            if len(individual) < MAX_SIZE:
+                individual.insert(random.randint(0, len(individual)), random.randint(low, up))
     for i in range(len(individual)):
         if random.random() < indpb:
             delta = 1 + random.expovariate(lambd)
@@ -110,6 +114,12 @@ def mutExponential(individual, lambd, low, up, indpb):
             elif individual[i] > up:
                 individual[i] = up
     return individual,
+
+def average_pop_length(population):
+    count = 0
+    for ind in population:
+        count += len(ind)
+    return count/POP_SIZE
 
 toolbox.register("mate", tools.cxOnePoint)
 toolbox.register("mutate", mutExponential, lambd=LAMBDA, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
@@ -124,10 +134,10 @@ def main():
     avg_fit_list = []
     best_list = []
     prompt_list = []
+    avg_genome_length = 0
     for gen in range(NUM_GENERATIONS):
         offspring = toolbox.select(population, len(population))
         offspring = list(map(toolbox.clone, offspring))
-
         for child1, child2 in zip(offspring[::2], offspring[1::2]):
             if random.random() < CROSSOVER_PROB:
                 toolbox.mate(child1, child2)
@@ -150,6 +160,9 @@ def main():
         max_fit = max(fits)
         avg_fit = sum(fits) / len(fits)
         print(f"Gen {gen}: Max fitness {max_fit}, Avg fitness {avg_fit}")
+
+        avg_genome_length = average_pop_length(population)
+        print("Average genome length: "+str(avg_genome_length))
 
         best_ind = tools.selBest(population, 1)[0]
         prompt = detokenize(best_ind)
