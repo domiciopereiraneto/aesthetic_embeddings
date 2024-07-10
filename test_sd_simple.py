@@ -1,67 +1,73 @@
 import torch
-from torch import autocast
-from torchvision import transforms as tf
-from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler
-from transformers import CLIPTextModel, CLIPTokenizer
+from diffusers import StableDiffusionPipeline
 from PIL import Image
-import numpy as np
 
-device = "cuda:1" if torch.cuda.is_available() else "cpu"
+device = "cuda:1"
 
-# Load the components individually
-vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae").to(device)
-tokenizer = CLIPTokenizer.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="tokenizer")
-text_encoder = CLIPTextModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="text_encoder").to(device)
-unet = UNet2DConditionModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="unet").to(device)
-scheduler = PNDMScheduler.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="scheduler")
+# Load the pre-trained Stable Diffusion model
+model_id = "CompVis/stable-diffusion-v1-4"
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
 
-# Move models to GPU if available
-vae = vae.to(device)
-unet = unet.to(device)
-text_encoder = text_encoder.to(device)
+# Define the prompt for image generation
+prompt = "A fantasy landscape with mountains, a river, and a castle"
+num_inference_steps = 50
+guidance_scale = 7.5
+height = 512
+width = 512
 
-# Tokenize the prompt
-prompt = "emmy governance pessibrt corridor enable hostbritt seeking aishwarya unlawful hose disturbed reverscurrytimate my latvia gimmcyberpunk secretary opens emanuel sirikingjames warrancollins blk loaddecoration boxed drilling sively dq jamboburningcounsel 마sthelgofundme inccl oura coma revue anger simonwesley celebrates ious gurudev redhead flooding �roar redmond gmt raju falconvera prohibanglers moose lool acosta ominlt dering hoboken prodisisbrand ( emmys astro"
-inputs = tokenizer(prompt, return_tensors="pt", padding="max_length", max_length=77, truncation=True)
-input_ids = inputs.input_ids.to(device)
+# Encode the prompt text
+text_input = pipe.tokenizer(prompt, return_tensors="pt", padding="max_length", max_length=77, truncation=True).to(device)
+text_embeddings = pipe.text_encoder(text_input.input_ids.to(device))[0]
 
-# Encode the prompt
-with torch.no_grad():
-    text_embeddings = text_encoder(input_ids)[0]
+# Create unconditional embeddings for classifier-free guidance
+uncond_input = pipe.tokenizer("", return_tensors="pt", padding="max_length", max_length=77, truncation=True).to(device)
+uncond_embeddings = pipe.text_encoder(uncond_input.input_ids.to(device))[0]
 
+# Concatenate the unconditional and text embeddings
+encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings])
+
+# Generate random latent vector or provide your own
+# Here, we're generating a random latent vector. Replace this with your own latent vector if needed.
 SEED = 42
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
+latents = torch.randn((1, pipe.unet.in_channels, height // 8, width // 8), generator=generator, device=device, requires_grad=False)
 
-num_channels_latents = unet.in_channels
-height = 512
-width = 512
-latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device=device, generator=generator, requires_grad=False)
-
-# Set scheduler parameters
-scheduler.set_timesteps(50)  # Number of denoising steps
-timesteps = scheduler.timesteps
+# Define the scheduler
+pipe.scheduler.set_timesteps(num_inference_steps)
 
 # Denoising loop
-for i, t in enumerate(timesteps):
-    with autocast("cuda"):
-        # Predict the noise residual
-        with torch.no_grad():
-            noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings).sample
+for i, t in enumerate(pipe.scheduler.timesteps):
+    # Expand the latents if we are doing classifier-free guidance
+    latent_model_input = torch.cat([latents] * 2) if guidance_scale > 1.0 else latents
 
-    # Perform the actual denoising step
-    latents = scheduler.step(noise_pred, t, latents).prev_sample
+    # Predict the noise residual
+    with torch.no_grad():
+        noise_pred = pipe.unet(latent_model_input, t, encoder_hidden_states=encoder_hidden_states)["sample"]
 
-# Decode the latents to image
-latents = 1 / 0.18215 * latents
+    # Perform guidance
+    if guidance_scale > 1.0:
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+    # Compute the previous noisy sample x_t -> x_t-1
+    latents = pipe.scheduler.step(noise_pred, t, latents)["prev_sample"]
+
+# Decode the latent vector to an image
 with torch.no_grad():
-    image = vae.decode(latents).sample
+    image = pipe.vae.decode(latents / pipe.vae.config.scaling_factor)["sample"]
 
-# Convert the image to a PIL image and save
+# Convert to PIL image
 image = (image / 2 + 0.5).clamp(0, 1)
 image = image.cpu().permute(0, 2, 3, 1).numpy()
 image = (image * 255).round().astype("uint8")
 image = Image.fromarray(image[0])
 
-image.save("test.png")
-print("Image generated and saved as test.png")
+# Save the generated image to disk
+output_path = "test.png"
+image.save(output_path)
+
+# Display the image
+#image.show()
+
+print(f"Image saved at {output_path}")
