@@ -5,6 +5,7 @@ import numpy as np
 from deap import base, creator, tools, algorithms
 import simulacra_rank_image
 import os
+import csv
 
 # Load the pre-trained Stable Diffusion model
 device = "cuda:1"
@@ -13,10 +14,11 @@ pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float
 
 aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
-NUM_GENERATIONS, POP_SIZE, TOUNRMENT_SIZE = 5, 5, 3
+NUM_GENERATIONS, POP_SIZE, TOURNAMENT_SIZE = 5, 5, 3
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.8, 0.8, 0.2
 
 MUTATION_MU, MUTATION_SIGMA = 0, 1
+MIN_VALUE, MAX_VALUE = -3, 3
 
 # Define the prompt for image generation
 prompt = "A fantasy landscape with mountains, a river, and a castle"
@@ -42,7 +44,7 @@ encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings])
 # Define the aesthetic metric
 def aesthetic_evaluation(image):
     aesthetic_score = aesthetic_model.predict(image)
-    return aesthetic_score
+    return aesthetic_score.item()
 
 def evaluate(individual):
     image = generate_image_from_latents(individual)
@@ -52,6 +54,7 @@ def evaluate(individual):
 # Define the fitness function
 def generate_image_from_latents(individual):
     latents = torch.tensor(individual, device=device, dtype=torch.float32).view(1, pipe.unet.in_channels, height // 8, width // 8)
+    latents = torch.clamp(latents, MIN_VALUE, MAX_VALUE)
 
     # Denoising loop
     for i, t in enumerate(pipe.scheduler.timesteps):
@@ -85,16 +88,58 @@ toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
 toolbox.register("mate", tools.cxBlend, alpha=0.5)
 toolbox.register("mutate", tools.mutGaussian, mu=MUTATION_MU, sigma=MUTATION_SIGMA, indpb=IND_MUTATION_PROB)
-toolbox.register("select", tools.selTournament, tournsize=TOUNRMENT_SIZE)
+toolbox.register("select", tools.selTournament, tournsize=TOURNAMENT_SIZE)
 toolbox.register("evaluate", evaluate)
 
 # Initialize the population
 population = toolbox.population(n=POP_SIZE)
 
-# Run the evolutionary algorithm
-algorithms.eaSimple(population, toolbox, cxpb=CROSSOVER_PROB, mutpb=MUTATION_PROB, ngen=NUM_GENERATIONS, verbose=True)
+# Create lists to store the statistics for each generation
+mean_fitnesses = []
+best_fitnesses = []
+best_individuals = []
 
-# Get the best individual
+def record_stats(pop):
+    fitnesses = [ind.fitness.values[0] for ind in pop]
+    mean_fitness = np.mean(fitnesses)
+    best_fitness = np.max(fitnesses)
+    best_individual = tools.selBest(pop, 1)[0]
+
+    mean_fitnesses.append(mean_fitness)
+    best_fitnesses.append(best_fitness)
+    best_individuals.append(best_individual)
+
+# Run the evolutionary algorithm with stats recording
+for gen in range(NUM_GENERATIONS):
+    population = algorithms.varAnd(population, toolbox, cxpb=CROSSOVER_PROB, mutpb=MUTATION_PROB)
+    invalid_ind = [ind for ind in population if not ind.fitness.valid]
+    fitnesses = list(map(toolbox.evaluate, invalid_ind))
+    for ind, fit in zip(invalid_ind, fitnesses):
+        ind.fitness.values = fit
+    population = toolbox.select(population, len(population))
+    record_stats(population)
+    print(f"Generation {gen+1}: Mean Fitness = {mean_fitnesses[-1]}, Best Fitness = {best_fitnesses[-1]}")
+
+    best_individual = tools.selBest(population, 1)[0]
+    image = generate_image_from_latents(best_individual)
+    image = Image.fromarray(image)
+    image.save("results/best_"+str(gen+1)+".png")
+
+# Save the statistics to a CSV file
+with open("results/results.csv", "w", newline="") as csvfile:
+    fieldnames = ["Generation", "Mean Fitness", "Best Fitness", "Best Individual"]
+    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+    writer.writeheader()
+    for gen in range(NUM_GENERATIONS):
+        writer.writerow({
+            "Generation": gen + 1,
+            "Mean Fitness": mean_fitnesses[gen],
+            "Best Fitness": best_fitnesses[gen],
+            "Best Individual": best_individuals[gen].tolist()
+        })
+
+# Get the best individual from the final population
 best_ind = tools.selBest(population, 1)[0]
 
 image = generate_image_from_latents(best_ind)
