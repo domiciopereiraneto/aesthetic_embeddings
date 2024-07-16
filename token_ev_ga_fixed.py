@@ -9,7 +9,7 @@ import simulacra_rank_image
 import copy
 
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
-NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 20, 20, 3, 1
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 50, 50, 3, 1
 LAMBDA = 0.1
 
 # Check if a GPU is available and if not, use the CPU
@@ -27,7 +27,7 @@ pipe.scheduler.set_timesteps(num_inference_steps)
 
 aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
-SEED = 4321
+SEED = 54321
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
 
