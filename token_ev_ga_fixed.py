@@ -9,7 +9,7 @@ import simulacra_rank_image
 import copy
 
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
-NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 50, 50, 3, 1
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 100, 100, 3, 1
 LAMBDA = 0.1
 
 # Check if a GPU is available and if not, use the CPU
@@ -27,7 +27,7 @@ pipe.scheduler.set_timesteps(num_inference_steps)
 
 aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
-SEED = 54321
+SEED = 4242
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
 
@@ -38,7 +38,7 @@ latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device
 
 MIN_VALUE, MAX_VALUE = 0, pipe.tokenizer.vocab_size-3
 START_OF_TEXT, END_OF_TEXT = pipe.tokenizer.bos_token_id, pipe.tokenizer.eos_token_id
-VECTOR_SIZE = 10
+VECTOR_SIZE = 15
 
 # Create unconditional embeddings for classifier-free guidance
 uncond_input = pipe.tokenizer("", return_tensors="pt", padding="max_length", max_length=77, truncation=True).to(device)
@@ -132,6 +132,7 @@ def main():
 
     max_fit_list = []
     avg_fit_list = []
+    std_fit_list = []
     best_list = []
     prompt_list = []
     for gen in range(NUM_GENERATIONS):
@@ -161,6 +162,7 @@ def main():
         fits = [ind.fitness.values[0] for ind in population]
         max_fit = max(fits)
         avg_fit = sum(fits) / len(fits)
+        std_fit = np.std(fits)
         print(f"Gen {gen}: Max fitness {max_fit}, Avg fitness {avg_fit}")
 
         # Generate and display the best image
@@ -169,6 +171,7 @@ def main():
 
         max_fit_list.append(max_fit)
         avg_fit_list.append(avg_fit)
+        std_fit_list.append(std_fit)
         best_list.append(best_ind)
         prompt_list.append(prompt)
 
@@ -186,7 +189,8 @@ def main():
     pil_image = Image.fromarray((best_image))
     pil_image.save("results/best_all.png")
 
-    pd.DataFrame({"generation": list(range(1,NUM_GENERATIONS+1)), "best_fitness": max_fit_list, "average_fitness": avg_fit_list,
+    pd.DataFrame({"generation": list(range(1,NUM_GENERATIONS+1)), "best_fitness": max_fit_list, 
+                  "average_fitness": avg_fit_list, "std_fitness": std_fit_list, 
                   "best_individual": best_list, "prompt": prompt_list}).to_csv("results/fitness_results.csv", index=False)
 
 def detokenize(individual):
