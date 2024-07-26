@@ -7,6 +7,15 @@ import random
 from PIL import Image
 import simulacra_rank_image
 import copy
+import argparse
+import sys
+import os
+
+parser = argparse.ArgumentParser(description='Receives argument seed (int).')
+
+parser.add_argument('--seed', type=int, help='Seed')
+
+args = parser.parse_args()
 
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
 NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 100, 100, 3, 1
@@ -27,9 +36,18 @@ pipe.scheduler.set_timesteps(num_inference_steps)
 
 aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
-SEED = 4242
+if args.seed is not None:
+    SEED = args.seed
+else:
+    print("Error: the argument seed was not provided.")
+    sys.exit(1)
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
+
+results_folder = "results_"+str(SEED)
+
+if not os.path.exists(results_folder):
+    os.makedirs(results_folder)
 
 num_channels_latents = pipe.unet.in_channels
 height = 512
@@ -178,7 +196,7 @@ def main():
         best_text_embeddings = torch.tensor(best_ind, device=device).unsqueeze(0)
         best_image = generate_image_from_embeddings(best_text_embeddings)
         pil_image = Image.fromarray((best_image))
-        pil_image.save("results/best_%d.png" % (gen+1))
+        pil_image.save(results_folder+"/best_%d.png" % (gen+1))
 
     best_ind = tools.selBest(population, 1)[0]
     print("Best individual is %s, with fitness: %s" % (best_ind, best_ind.fitness.values))
@@ -187,11 +205,11 @@ def main():
     best_text_embeddings = torch.tensor(best_ind, device=device).unsqueeze(0)
     best_image = generate_image_from_embeddings(best_text_embeddings)
     pil_image = Image.fromarray((best_image))
-    pil_image.save("results/best_all.png")
+    pil_image.save(results_folder+"/best_all.png")
 
     pd.DataFrame({"generation": list(range(1,NUM_GENERATIONS+1)), "best_fitness": max_fit_list, 
                   "average_fitness": avg_fit_list, "std_fitness": std_fit_list, 
-                  "best_individual": best_list, "prompt": prompt_list}).to_csv("results/fitness_results.csv", index=False)
+                  "best_individual": best_list, "prompt": prompt_list}).to_csv(results_folder+"/fitness_results.csv", index=False)
 
 def detokenize(individual):
     tmp_solution = torch.tensor(individual, dtype=torch.int64)
