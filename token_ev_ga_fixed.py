@@ -10,19 +10,33 @@ import copy
 import argparse
 import sys
 import os
+import matplotlib.pyplot as plt
 
 parser = argparse.ArgumentParser(description='Receives argument seed (int).')
 
 parser.add_argument('--seed', type=int, help='Seed')
+parser.add_argument('--cuda', type=int, help='Cuda GPU to use')
 
 args = parser.parse_args()
+
+if args.seed is not None:
+    SEED = args.seed
+else:
+    print("Seed not provided, default is 42")
+    SEED = 42
+
+if args.cuda is not None:
+    cuda_n = str(args.cuda)
+else:
+    print("Cuda device not provided, default is 0")
+    cuda_n = str(0)
 
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
 NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 100, 100, 3, 1
 LAMBDA = 0.1
 
 # Check if a GPU is available and if not, use the CPU
-device = "cuda:0" if torch.cuda.is_available() else "cpu"
+device = "cuda:"+cuda_n  if torch.cuda.is_available() else "cpu"
 
 # Load the components of the Stable Diffusion pipeline
 model_id = "CompVis/stable-diffusion-v1-4"
@@ -36,11 +50,6 @@ pipe.scheduler.set_timesteps(num_inference_steps)
 
 aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
-if args.seed is not None:
-    SEED = args.seed
-else:
-    print("Error: the argument seed was not provided.")
-    sys.exit(1)
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
 
@@ -145,7 +154,7 @@ toolbox.register("select", tools.selTournament, tournsize=TOURNMENT_SIZE)
 toolbox.register("evaluate", evaluate)
 
 def main():
-    random.seed(42)
+    random.seed(SEED)
     population = toolbox.population(n=POP_SIZE)
 
     max_fit_list = []
@@ -207,9 +216,13 @@ def main():
     pil_image = Image.fromarray((best_image))
     pil_image.save(results_folder+"/best_all.png")
 
-    pd.DataFrame({"generation": list(range(1,NUM_GENERATIONS+1)), "best_fitness": max_fit_list, 
+    results = pd.DataFrame({"generation": list(range(1,NUM_GENERATIONS+1)), "best_fitness": max_fit_list, 
                   "average_fitness": avg_fit_list, "std_fitness": std_fit_list, 
-                  "best_individual": best_list, "prompt": prompt_list}).to_csv(results_folder+"/fitness_results.csv", index=False)
+                  "best_individual": best_list, "prompt": prompt_list})
+    
+    results.to_csv(results_folder+"/fitness_results.csv", index=False)
+
+    save_plot_results(results)
 
 def detokenize(individual):
     tmp_solution = torch.tensor(individual, dtype=torch.int64)
@@ -217,6 +230,30 @@ def detokenize(individual):
     decoded_string = pipe.tokenizer.decode(tmp_solution, skip_special_tokens=True, clean_up_tokenization_spaces = True)
 
     return decoded_string
+
+def plot_mean_std(x_axis, m_vec, std_vec, description, title = None, y_label = None, x_label = None):
+    lower_bound = [M_new - Sigma for M_new, Sigma in zip(m_vec, std_vec)]
+    upper_bound = [M_new + Sigma for M_new, Sigma in zip(m_vec, std_vec)]
+    
+    plt.plot(x_axis, m_vec, '--', label=description + " Avg.")
+    plt.fill_between(x_axis, lower_bound, upper_bound, alpha=.3, label=description + " Avg. ± SD")  
+    if title is not None:
+        plt.title(title)
+    if y_label is not None:
+        plt.ylabel(y_label)
+    if x_label is not None:
+        plt.xlabel(x_label)
+
+def save_plot_results(results):
+    plt.figure()
+    plot_mean_std(results['generation'], results['average_fitness'], results['std_fitness'], "Population")
+    plt.plot(results['generation'], results['best_fitness'], 'r-', label="Best")
+    plt.ylim(0, 10)
+    plt.xlabel('Generation')
+    plt.ylabel('Fitness (Simulacra Score)')
+    plt.grid()
+    plt.legend()
+    plt.savefig(results_folder+"/fitness_evolution.png")
 
 if __name__ == "__main__":
     main()
