@@ -6,6 +6,7 @@ from deap import base, creator, tools
 import random
 from PIL import Image
 import simulacra_rank_image
+import laion_rank_image
 import copy
 import argparse
 import sys
@@ -15,15 +16,23 @@ import matplotlib.pyplot as plt
 parser = argparse.ArgumentParser(description='Receives argument seed (int).')
 
 parser.add_argument('--seed', type=int, help='Seed')
+parser.add_argument('--seed_path', type=str, help='Path to seed list file')
 parser.add_argument('--cuda', type=int, help='Cuda GPU to use')
+parser.add_argument('--predictor', type=int, help='Aesthetic predictor to use\n0 - SAM\n1 - LAION')
 
 args = parser.parse_args()
 
-if args.seed is not None:
+if args.seed_path is not None:
+    SEED_PATH = args.seed_path
+elif args.seed is not None:
+    print("Seed path not provided, executing single run")
     SEED = args.seed
+    SEED_PATH = None
 else:
+    print("Seed path not provided, executing single run")
     print("Seed not provided, default is 42")
     SEED = 42
+    SEED_PATH = None
 
 if args.cuda is not None:
     cuda_n = str(args.cuda)
@@ -31,9 +40,22 @@ else:
     print("Cuda device not provided, default is 0")
     cuda_n = str(0)
 
+if args.predictor is not None:
+    predictor = args.predictor
+else:
+    print("Aesthetic predictor not provided, default is 0 (SAM)")
+    predictor = 1
+
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
 NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 100, 100, 3, 1
 LAMBDA = 0.1
+
+if SEED_PATH is None:
+    seed_list = [SEED]
+else:
+    with open(SEED_PATH, 'r') as file:
+        # Read each line, strip newline characters, and convert to integers
+        seed_list = [int(line.strip()) for line in file]
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:"+cuda_n  if torch.cuda.is_available() else "cpu"
@@ -48,20 +70,10 @@ guidance_scale = 7.5
 # Define the scheduler
 pipe.scheduler.set_timesteps(num_inference_steps)
 
-aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
-
-generator = torch.Generator(device=device)
-generator.manual_seed(SEED)
-
-results_folder = "results_"+str(SEED)
-
-if not os.path.exists(results_folder):
-    os.makedirs(results_folder)
-
-num_channels_latents = pipe.unet.in_channels
-height = 512
-width = 512
-latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device=device, generator=generator, requires_grad=False)
+if predictor == 1:
+    aesthetic_model = laion_rank_image.LAIONAesthetic(device)
+else:
+    aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
 MIN_VALUE, MAX_VALUE = 0, pipe.tokenizer.vocab_size-3
 START_OF_TEXT, END_OF_TEXT = pipe.tokenizer.bos_token_id, pipe.tokenizer.eos_token_id
@@ -71,9 +83,21 @@ VECTOR_SIZE = 15
 uncond_input = pipe.tokenizer("", return_tensors="pt", padding="max_length", max_length=77, truncation=True).to(device)
 uncond_embeddings = pipe.text_encoder(uncond_input.input_ids.to(device))[0]
 
+latents = []
+
+creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+creator.create("Individual", np.ndarray, fitness=creator.FitnessMax)
+
 # Define the aesthetic evaluation function
 def aesthetic_evaluation(image):
-    aesthetic_score = aesthetic_model.predict(image)
+    if predictor == 0:
+        aesthetic_score = aesthetic_model.predict(image)
+    elif predictor == 1:
+        pil_image = Image.fromarray((image))
+        aesthetic_score = aesthetic_model.predict(pil_image)
+    else:
+        # outras metricas aqui
+        return 0
     return aesthetic_score.item()
 
 # Function to generate an image from text embeddings
@@ -115,15 +139,6 @@ def generate_image_from_embeddings(token_vector, num_inference_steps=25):
 prompt = ""
 #token_vector = pipe.tokenizer([""], padding="max_length", max_length=pipe.tokenizer.model_max_length - 2, return_tensors="pt").input_ids
 
-# Genetic Algorithm setup
-creator.create("FitnessMax", base.Fitness, weights=(1.0,))
-creator.create("Individual", np.ndarray, fitness=creator.FitnessMax)
-
-toolbox = base.Toolbox()
-toolbox.register("attr_int", random.randint, MIN_VALUE, MAX_VALUE)
-toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, VECTOR_SIZE)
-toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-
 def evaluate(individual):
     text_embeddings = torch.tensor(individual, device=device).unsqueeze(0)
     image = generate_image_from_embeddings(text_embeddings)
@@ -147,14 +162,35 @@ def mutExponential(individual, lambd, low, up, indpb):
                 individual[i] = up
     return individual,
 
-toolbox.register("mate", tools.cxOnePoint)
-toolbox.register("mutate", tools.mutUniformInt, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
-#toolbox.register("mutate", mutExponential, lambd=LAMBDA, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
-toolbox.register("select", tools.selTournament, tournsize=TOURNMENT_SIZE)
-toolbox.register("evaluate", evaluate)
+def main(seed):
+    generator = torch.Generator(device=device)
+    generator.manual_seed(seed)
 
-def main():
-    random.seed(SEED)
+    results_folder = "results_"+str(predictor)+"_"+str(seed)
+
+    if not os.path.exists(results_folder):
+        os.makedirs(results_folder)
+
+    num_channels_latents = pipe.unet.in_channels
+    height = 512
+    width = 512
+
+    global latents
+    latents = torch.randn((1, num_channels_latents, height // 8, width // 8), device=device, generator=generator, requires_grad=False)
+
+    # Genetic Algorithm setup
+    toolbox = base.Toolbox()
+    toolbox.register("attr_int", random.randint, MIN_VALUE, MAX_VALUE)
+    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.attr_int, VECTOR_SIZE)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+
+    toolbox.register("mate", tools.cxOnePoint)
+    toolbox.register("mutate", tools.mutUniformInt, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
+    #toolbox.register("mutate", mutExponential, lambd=LAMBDA, low=MIN_VALUE, up=MAX_VALUE, indpb=IND_MUTATION_PROB)
+    toolbox.register("select", tools.selTournament, tournsize=TOURNMENT_SIZE)
+    toolbox.register("evaluate", evaluate)
+
+    random.seed(seed)
     population = toolbox.population(n=POP_SIZE)
 
     max_fit_list = []
@@ -190,7 +226,7 @@ def main():
         max_fit = max(fits)
         avg_fit = sum(fits) / len(fits)
         std_fit = np.std(fits)
-        print(f"Gen {gen}: Max fitness {max_fit}, Avg fitness {avg_fit}")
+        print(f"Gen {gen + 1}: Max fitness {max_fit}, Avg fitness {avg_fit}")
 
         # Generate and display the best image
         best_ind = tools.selBest(population, 1)[0]
@@ -208,7 +244,7 @@ def main():
         pil_image.save(results_folder+"/best_%d.png" % (gen+1))
 
     best_ind = tools.selBest(population, 1)[0]
-    print("Best individual is %s, with fitness: %s" % (best_ind, best_ind.fitness.values))
+    print("Seed %d, best individual is %s, with fitness: %s" % (seed, best_ind, best_ind.fitness.values))
 
     # Generate and display the best image
     best_text_embeddings = torch.tensor(best_ind, device=device).unsqueeze(0)
@@ -222,7 +258,7 @@ def main():
     
     results.to_csv(results_folder+"/fitness_results.csv", index=False)
 
-    save_plot_results(results)
+    save_plot_results(results, results_folder)
 
 def detokenize(individual):
     tmp_solution = torch.tensor(individual, dtype=torch.int64)
@@ -244,7 +280,7 @@ def plot_mean_std(x_axis, m_vec, std_vec, description, title = None, y_label = N
     if x_label is not None:
         plt.xlabel(x_label)
 
-def save_plot_results(results):
+def save_plot_results(results, results_folder):
     plt.figure()
     plot_mean_std(results['generation'], results['average_fitness'], results['std_fitness'], "Population")
     plt.plot(results['generation'], results['best_fitness'], 'r-', label="Best")
@@ -256,4 +292,6 @@ def save_plot_results(results):
     plt.savefig(results_folder+"/fitness_evolution.png")
 
 if __name__ == "__main__":
-    main()
+    for seed in seed_list:
+        main(seed)
+        print(f"Run with seed {seed} finished!")
