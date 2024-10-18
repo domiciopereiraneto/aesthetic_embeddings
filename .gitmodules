@@ -4,3 +4,6 @@
 [submodule "simulacra_aesthetic_models"]
 	path = simulacra_aesthetic_models
 	url = https://github.com/crowsonkb/simulacra-aesthetic-models
+[submodule "aesthetic-predictor"]
+	path = aesthetic-predictor
+	url = https://github.com/LAION-AI/aesthetic-predictor.git
