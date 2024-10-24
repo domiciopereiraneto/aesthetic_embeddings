@@ -7,6 +7,7 @@ import random
 from PIL import Image
 import simulacra_rank_image
 import laion_rank_image
+import nima_rank_image
 import copy
 import argparse
 import sys
@@ -44,10 +45,10 @@ if args.predictor is not None:
     predictor = args.predictor
 else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 1
+    predictor = 2
 
 CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
-NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 100, 100, 3, 1
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 2, 4, 3, 1
 LAMBDA = 0.1
 
 if SEED_PATH is None:
@@ -72,6 +73,8 @@ pipe.scheduler.set_timesteps(num_inference_steps)
 
 if predictor == 1:
     aesthetic_model = laion_rank_image.LAIONAesthetic(device)
+elif predictor == 2:
+    aesthetic_model = nima_rank_image.NIMAAsthetics()
 else:
     aesthetic_model = simulacra_rank_image.SimulacraAesthetic(device)
 
@@ -92,7 +95,7 @@ creator.create("Individual", np.ndarray, fitness=creator.FitnessMax)
 def aesthetic_evaluation(image):
     if predictor == 0:
         aesthetic_score = aesthetic_model.predict(image)
-    elif predictor == 1:
+    elif predictor == 1 or predictor == 2:
         pil_image = Image.fromarray((image))
         aesthetic_score = aesthetic_model.predict(pil_image)
     else:
