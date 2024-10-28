@@ -2,11 +2,14 @@ import os
 import subprocess
 import tempfile
 from PIL import Image
+import json
+import re
+import numpy as np
 
 class NIMAAsthetics():
     def predict(self, pil_image):
         model_name = 'MobileNet'
-        weights_file = 'image-quality-assessment/models/MobileNet/weights_mobilenet_aesthetic_0.07.hdf5'
+        weights_file = '/data/domicio/phd/image-quality-assessment/models/MobileNet/weights_mobilenet_aesthetic_0.07.hdf5'
         docker_image = 'nima-cpu'
         try:
             # Create a temporary file to save the PIL image
@@ -17,7 +20,7 @@ class NIMAAsthetics():
 
             # Build the docker run command
             command = [
-                './predict',
+                './image-quality-assessment/predict',
                 '--docker-image', docker_image,
                 '--base-model-name', model_name,
                 '--weights-file', weights_file,
@@ -32,8 +35,15 @@ class NIMAAsthetics():
                 print(f"Error running Docker container: {result.stderr}")
                 return None
             
+            # Extract JSON-like part of the string using regular expression
+            json_part = re.search(r'\{(.*?)\}', result.stdout, re.DOTALL).group(0)
+
+            # Load the JSON part and extract the mean score
+            data = json.loads(json_part)
+            mean_score_prediction = np.array([data["mean_score_prediction"]])
+
             # Return the classification result (stdout)
-            return result.stdout
+            return mean_score_prediction
 
         except Exception as e:
             print(f"An error occurred: {str(e)}")
