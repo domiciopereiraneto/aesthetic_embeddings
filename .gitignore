@@ -3,3 +3,13 @@ __pycache__
 simulacra-aesthetic-models
 test.png
 results_*
+best_results
+.ipynb_checkpoints
+Results
+best_runs_list.ipynb
+image_grid.ipynb
+image_grid.png
+latex_table.txt
+save_best_results_images.ipynb
+sorted_image_grid.png
+token_ev_ga_fixed_unconditional.py
