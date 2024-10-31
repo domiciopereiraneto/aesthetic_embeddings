@@ -23,9 +23,9 @@ class SimulacraAesthetic():
         )
         self.model = self.model.to(self.device)
 
-    def predict(self, tensor):
-        img = transforms.ToPILImage()(tensor).convert('RGB')
-        img = TF.resize(img, 224, transforms.InterpolationMode.LANCZOS)
+    def predict(self, img):
+        img = img.convert('RGB')
+        img = TF.resize(img, 224, interpolation=transforms.InterpolationMode.LANCZOS)
         img = TF.center_crop(img, (224,224))
         img = TF.to_tensor(img).to(self.device)
         img = self.normalize(img)

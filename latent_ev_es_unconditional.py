@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from diffusers import UNet2DModel, DDIMScheduler, VQModel
 import tqdm
-import cma
+from deap import base, creator, tools
 import random
 from PIL import Image
 import simulacra_rank_image
@@ -48,7 +48,9 @@ else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
     predictor = 0
 
-NUM_GENERATIONS, POP_SIZE = 10, 5  # Adjust as needed
+CROSSOVER_PROB, MUTATION_PROB, IND_MUTATION_PROB = 0.7, 0.9, 0.2
+NUM_GENERATIONS, POP_SIZE, TOURNMENT_SIZE, ELITISM = 10, 5, 3, 1  # Reduced for testing
+LAMBDA = 0.1
 
 if SEED_PATH is None:
     seed_list = [SEED]
@@ -96,7 +98,7 @@ def aesthetic_evaluation(image):
 # Function to generate an image from noise vector
 def generate_image_from_noise(noise):
     image = noise
-    for t in scheduler.timesteps:
+    for t in tqdm.tqdm(scheduler.timesteps):
         # predict noise residual of previous image
         with torch.no_grad():
             residual = unet(image, t)["sample"]
@@ -121,31 +123,26 @@ def generate_image_from_noise(noise):
     pil_image = Image.fromarray(image_processed)
     return pil_image
 
-def evaluate(x):
-    # x is a NumPy array representing the noise vector
-    # Convert it to a torch tensor
-    noise = torch.tensor(x, dtype=torch.float32, device=device)
+def evaluate(individual):
+    # Convert the list back to a tensor
+    noise = torch.tensor(individual, dtype=torch.float32, device=device)
     # Reshape the noise to the original shape
     noise = noise.view(1, unet.in_channels, unet.sample_size, unet.sample_size)
     image = generate_image_from_noise(noise)
     score = aesthetic_evaluation(image)
-    # CMA-ES minimizes the function, so we need to invert the score if higher is better
-    return -score  # Negate the score to turn maximization into minimization
+    return (score,)
 
-def normalize_noise_vector(x):
-    x_mean = np.mean(x)
-    x_std = np.std(x)
-    if x_std == 0:
-        x_std = 1e-8  # Prevent division by zero
-    x_normalized = (x - x_mean) / x_std
-    return x_normalized
-
+def normalize_noise(individual):
+    array = np.array(individual)
+    mean = np.mean(array)
+    std = np.std(array)
+    if std == 0:
+        std = 1e-8  # Prevent division by zero
+    normalized = (array - mean) / std
+    return creator.Individual(normalized)
 
 def main(seed):
     generator = torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-
     noise = torch.randn(
         (1, unet.in_channels, unet.sample_size, unet.sample_size),
         generator=generator,
@@ -159,78 +156,99 @@ def main(seed):
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
-    # Set CMA-ES options
-    es_options = {
-        'seed': seed,
-        'popsize': POP_SIZE,
-        'maxiter': NUM_GENERATIONS,
-        'verb_filenameprefix': results_folder + '/outcmaes',  # Save logs
-        'verb_log': 0,  # Disable log output
-        'verbose': -9,  # Suppress console output
-    }
+    # Evolutionary Algorithm setup
+    random.seed(seed)
 
-    # Initialize CMA-ES
-    sigma0 = 0.5  # Initial standard deviation
-    es = cma.CMAEvolutionStrategy(initial_noise, sigma0, es_options)
+    # DEAP setup
+    if "FitnessMax" not in creator.__dict__:
+        creator.create("FitnessMax", base.Fitness, weights=(1.0,))
+    if "Individual" not in creator.__dict__:
+        creator.create("Individual", list, fitness=creator.FitnessMax)
+
+    def initIndividual(icls, content):
+        return icls(content + np.random.normal(0, 1, len(content)))
+        #return icls(content)
+
+    toolbox = base.Toolbox()
+    toolbox.register("individual", initIndividual, creator.Individual, content=initial_noise)
+    toolbox.register("population", tools.initRepeat, list, toolbox.individual)
+    toolbox.register("evaluate", evaluate)
+    toolbox.register("mate", tools.cxBlend, alpha=0.5)
+    toolbox.register("mutate", tools.mutGaussian, mu=0, sigma=0.1, indpb=IND_MUTATION_PROB)
+    toolbox.register("select", tools.selTournament, tournsize=TOURNMENT_SIZE)
+
+    pop = toolbox.population(n=POP_SIZE)
+
+    for ind in pop:
+        ind = normalize_noise(ind)
 
     max_fit_list = []
     avg_fit_list = []
     std_fit_list = []
     best_list = []
 
-    generation = 0
+    for gen in range(NUM_GENERATIONS):
+        print(f"Generation {gen+1}/{NUM_GENERATIONS}")
+        # Evaluate the individuals
+        fitnesses = list(map(toolbox.evaluate, pop))
+        for ind, fit in zip(pop, fitnesses):
+            ind.fitness.values = fit
 
-    while not es.stop():
-        print(f"Generation {generation+1}/{NUM_GENERATIONS}")
-        # Ask for new candidate solutions
-        solutions = es.ask()
-        # Normalize each solution
-        solutions = [normalize_noise_vector(x) for x in solutions]
-        # Evaluate candidate solutions
-        fitnesses = []
-        for x in solutions:
-            fitness = evaluate(x)
-            fitnesses.append(fitness)
-        # Tell CMA-ES the fitnesses
-        es.tell(solutions, fitnesses)
-
-        # Record statistics
-        scores = [-f for f in fitnesses]  # Convert back to positive scores
-        max_fit = max(scores)
-        avg_fit = np.mean(scores)
-        std_fit = np.std(scores)
-
-        max_fit_list.append(max_fit)
+        # Record the best individual
+        best_ind = tools.selBest(pop, 1)[0]
+        max_fit_list.append(best_ind.fitness.values[0])
+        avg_fit = np.mean([ind.fitness.values[0] for ind in pop])
         avg_fit_list.append(avg_fit)
+        std_fit = np.std([ind.fitness.values[0] for ind in pop])
         std_fit_list.append(std_fit)
-
-        # Get best solution so far
-        best_x = es.result.xbest
-        best_score = -es.result.fbest  # Convert back to positive score
-        best_list.append(best_score)
-
-        # Generate and save the best image
-        best_noise = torch.tensor(best_x, dtype=torch.float32, device=device)
-        best_noise = best_noise.view(noise_shape)
-        best_image = generate_image_from_noise(best_noise)
-        best_image.save(results_folder + "/best_%d.png" % (generation+1))
+        best_list.append(copy.deepcopy(best_ind))
 
         # Print stats
-        print(f"Generation {generation+1}: Max fitness: {max_fit}, Avg fitness: {avg_fit}")
+        print("Generation %d: Max fitness: %f, Avg fitness: %f" % (gen+1, max_fit_list[-1], avg_fit_list[-1]))
 
-        generation += 1
-        if generation >= NUM_GENERATIONS:
-            break
+        # Generate and save the best image
+        best_noise = torch.tensor(best_ind, dtype=torch.float32, device=device)
+        best_noise = best_noise.view(noise_shape)
+        best_image = generate_image_from_noise(best_noise)
+        best_image.save(results_folder + "/best_%d.png" % (gen+1))
+
+        # Generate the next generation
+        offspring = toolbox.select(pop, len(pop) - ELITISM)
+        offspring = list(map(toolbox.clone, offspring))
+
+        # Apply crossover and mutation
+        for child1, child2 in zip(offspring[::2], offspring[1::2]):
+            if random.random() < CROSSOVER_PROB:
+                toolbox.mate(child1, child2)
+                del child1.fitness.values
+                del child2.fitness.values
+
+        for mutant in offspring:
+            if random.random() < MUTATION_PROB:
+                toolbox.mutate(mutant)
+                del mutant.fitness.values
+
+        # After applying crossover and mutation
+        for ind in offspring:
+            ind = normalize_noise(ind)
+
+        # Add the elites
+        elites = tools.selBest(pop, ELITISM)
+        offspring.extend(elites)
+
+        # Replace population
+        pop[:] = offspring
 
     # Save the overall best image
-    best_noise = torch.tensor(es.result.xbest, dtype=torch.float32, device=device)
+    best_ind = tools.selBest(pop, 1)[0]
+    best_noise = torch.tensor(best_ind, dtype=torch.float32, device=device)
     best_noise = best_noise.view(noise_shape)
     best_image = generate_image_from_noise(best_noise)
     best_image.save(results_folder + "/best_all.png")
 
     # Save the metrics
     results = pd.DataFrame({
-        "generation": list(range(1, generation + 1)),
+        "generation": list(range(1, NUM_GENERATIONS + 1)),
         "best_fitness": max_fit_list,
         "average_fitness": avg_fit_list,
         "std_fitness": std_fit_list
