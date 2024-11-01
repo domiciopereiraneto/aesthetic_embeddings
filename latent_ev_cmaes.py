@@ -2,16 +2,13 @@ import torch
 import numpy as np
 import pandas as pd
 from diffusers import UNet2DModel, DDIMScheduler, VQModel
-import tqdm
 import cma
 import random
 from PIL import Image
 import simulacra_rank_image
 import laion_rank_image
 import nima_rank_image
-import copy
 import argparse
-import sys
 import os
 import matplotlib.pyplot as plt
 
@@ -48,7 +45,7 @@ else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
     predictor = 0
 
-NUM_GENERATIONS, POP_SIZE = 10, 5  # Adjust as needed
+NUM_GENERATIONS, POP_SIZE = 100, 100  # Adjust as needed
 
 if SEED_PATH is None:
     seed_list = [SEED]
@@ -68,7 +65,7 @@ scheduler = DDIMScheduler.from_pretrained("CompVis/ldm-celebahq-256", subfolder=
 unet.to(device)
 vqvae.to(device)
 
-num_inference_steps = 100
+num_inference_steps = 25
 guidance_scale = 7.5
 
 # Define the scheduler
