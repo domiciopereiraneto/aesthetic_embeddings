@@ -81,10 +81,9 @@ else:
 # Define the aesthetic evaluation function
 def aesthetic_evaluation(image):
     if predictor == 0:
-        aesthetic_score = aesthetic_model.predict(image)
+        aesthetic_score = aesthetic_model.predict_from_pil(image)
     elif predictor == 1 or predictor == 2:
-        pil_image = Image.fromarray(image)
-        aesthetic_score = aesthetic_model.predict(pil_image)
+        aesthetic_score = aesthetic_model.predict(image)
     else:
         # Other metrics here
         return 0

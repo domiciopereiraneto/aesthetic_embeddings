@@ -2,7 +2,6 @@ import torch
 import numpy as np
 import pandas as pd
 from diffusers import UNet2DModel, DDIMScheduler, VQModel
-import cma
 import random
 from PIL import Image
 import simulacra_rank_image
@@ -45,7 +44,7 @@ else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
     predictor = 0
 
-NUM_GENERATIONS, POP_SIZE = 100, 100  # Adjust as needed
+NUM_ITERATIONS = 50000  # Adjust as needed
 
 if SEED_PATH is None:
     seed_list = [SEED]
@@ -58,9 +57,9 @@ else:
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load all models
-unet = UNet2DModel.from_pretrained("CompVis/ldm-celebahq-256", subfolder="unet")
-vqvae = VQModel.from_pretrained("CompVis/ldm-celebahq-256", subfolder="vqvae")
-scheduler = DDIMScheduler.from_pretrained("CompVis/ldm-celebahq-256", subfolder="scheduler")
+unet = UNet2DModel.from_pretrained("CompVis/ldm-celebahq-256", subfolder="unet", use_safetensors=False)
+vqvae = VQModel.from_pretrained("CompVis/ldm-celebahq-256", subfolder="vqvae", use_safetensors=False)
+scheduler = DDIMScheduler.from_pretrained("CompVis/ldm-celebahq-256", subfolder="scheduler", use_safetensors=False)
 
 unet.to(device)
 vqvae.to(device)
@@ -80,11 +79,11 @@ else:
 
 def aesthetic_evaluation(image_tensor):
     # image_tensor: [batch_size, height, width, channels]
-    image_tensor = image_tensor.permute(0, 3, 1, 2)  # Convert to [batch_size, channels, height, width]
+    image_tensor = image_tensor.permute(2, 0, 1)  # Convert to [batch_size, channels, height, width]
 
     if predictor == 0:
         # Simulacra Aesthetic Model
-        aesthetic_score = aesthetic_model.predict(image_tensor)
+        aesthetic_score = aesthetic_model.predict_from_tensor(image_tensor)
     elif predictor == 1:
         # LAION Aesthetic Model
         aesthetic_score = aesthetic_model.predict(image_tensor)
@@ -116,7 +115,7 @@ def generate_image_from_noise(noise):
     image_processed = (image_processed + 1.0) * 127.5
     image_processed = image_processed.clamp(0, 255) / 255.0  # Normalize to [0,1]
 
-    return image_processed  # Return as tensor
+    return image_processed[0]  # Return as tensor
 
 def evaluate(x):
     # x is a NumPy array representing the noise vector
@@ -158,8 +157,6 @@ def main_adam(seed):
     best_score = -float('inf')
     best_noise = None
 
-    NUM_ITERATIONS = 100  # Adjust as needed
-
     for iteration in range(1, NUM_ITERATIONS + 1):
         print(f"Iteration {iteration}/{NUM_ITERATIONS}")
 
@@ -188,7 +185,7 @@ def main_adam(seed):
 
         # Save the best image
         best_image_tensor = generate_image_from_noise(best_noise)
-        best_image = best_image_tensor.detach().cpu().numpy()[0]
+        best_image = best_image_tensor.detach().cpu().numpy()
         best_image = (best_image * 255).astype(np.uint8)
         best_image = Image.fromarray(best_image)
         best_image.save(f"{results_folder}/best_{iteration}.png")
