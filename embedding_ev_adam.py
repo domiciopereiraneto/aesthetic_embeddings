@@ -12,6 +12,7 @@ import laion_rank_image
 import argparse
 import os
 import matplotlib.pyplot as plt
+import time
 
 parser = argparse.ArgumentParser(description='Receives argument seed (int).')
 
@@ -174,7 +175,19 @@ def aesthetic_evaluation(image):
 
     return score
 
-def main(seed):
+def format_time(seconds):
+    seconds = int(seconds)
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    if hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
+def main(seed, seed_number):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -198,6 +211,8 @@ def main(seed):
     max_fit_list = []
     best_score = -float('inf')
     best_text_embeddings = None
+
+    start_time = time.time()
 
     for iteration in range(1, NUM_ITERATIONS + 1):
         print(f"Iteration {iteration}/{NUM_ITERATIONS}")
@@ -229,8 +244,16 @@ def main(seed):
         pil_image = Image.fromarray(best_image_np)
         pil_image.save(f"{results_folder}/best_{iteration}.png")
 
+        elapsed_time = time.time() - start_time
+        iterations_done = iteration
+        iterations_left = NUM_ITERATIONS - iteration
+        average_time_per_iteration = elapsed_time / iterations_done
+        estimated_time_remaining = average_time_per_iteration * iterations_left
+
+        formatted_time_remaining = format_time(estimated_time_remaining)
+
         # Print stats
-        print(f"Iteration {iteration}: Score: {score.item()}")
+        print(f"Seed {seed_number} Iteration {iteration}/{NUM_ITERATIONS}: Score: {score.item()}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
     with torch.no_grad():
@@ -263,6 +286,8 @@ def plot_results(results, results_folder):
     plt.close()
 
 if __name__ == "__main__":
+    i = 1
     for seed in seed_list:
-        main(seed)
+        main(seed, i)
         print(f"Run with seed {seed} finished!")
+        i += 1
