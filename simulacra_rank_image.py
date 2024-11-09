@@ -36,7 +36,7 @@ class SimulacraAesthetic():
 
         return score
 
-    def predict_from_tensor(self, img_tensor):
+    def predict_from_tensor(self, img_tensor, data_type = torch.float32):
         # Ensure the tensor is in RGB format and on the correct device
         img_tensor = img_tensor.to(self.device)
         
@@ -54,6 +54,6 @@ class SimulacraAesthetic():
         )
         
         # Get the score from the model
-        score = self.model(clip_image_embed)
+        score = self.model(clip_image_embed).to(data_type)
         
         return score

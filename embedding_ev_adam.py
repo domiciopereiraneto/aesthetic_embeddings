@@ -47,17 +47,24 @@ else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
     predictor = 0  # Set default to SAM
 
+num_inference_steps = 30
+guidance_scale = 7.5
+# Height and width of the images
+height = 256
+width = 256
+
+NUM_ITERATIONS = 20  
+
+float_type = torch.float16
+
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
 model_id = "CompVis/stable-diffusion-v1-4"
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=float_type).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)
-
-num_inference_steps = 30
-guidance_scale = 7.5
 
 # Define the scheduler
 pipe.scheduler.set_timesteps(num_inference_steps)
@@ -86,18 +93,12 @@ else:
 if not supports_grad:
     raise ValueError(f"The selected aesthetic model '{model_name}' does not support backpropagation required for gradient-based optimization.")
 
-NUM_ITERATIONS = 1000  # Adjust as needed
-
 if SEED_PATH is None:
     seed_list = [SEED]
 else:
     with open(SEED_PATH, 'r') as file:
         # Read each line, strip newline characters, and convert to integers
         seed_list = [int(line.strip()) for line in file]
-
-# Height and width of the images
-height = 256
-width = 256
 
 def generate_image_from_embeddings(text_embeddings, seed):
 
@@ -121,7 +122,7 @@ def generate_image_from_embeddings(text_embeddings, seed):
         (1, pipe.unet.config.in_channels, height // 8, width // 8),
         generator=generator,
         device=device,
-        dtype=torch.float32
+        dtype=float_type
     )
 
     # Denoising loop
@@ -163,7 +164,7 @@ def aesthetic_evaluation(image):
 
     if predictor == 0:
         # Simulacra Aesthetic Model
-        score = aesthetic_model.predict_from_tensor(image_input)
+        score = aesthetic_model.predict_from_tensor(image_input, data_type=float_type)
     elif predictor == 1:
         # LAION Aesthetic Predictor
         score = aesthetic_model.predict(image_input)
@@ -203,7 +204,7 @@ def main(seed, seed_number):
     text_embeddings_init = pipe.text_encoder(text_input.input_ids.to(device))[0]
     text_embeddings = torch.nn.Parameter(text_embeddings_init.clone())
 
-    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5)  # Adjust learning rate as needed
+    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
 
     results_folder = f"results_adam_{model_name}_{seed}"
     os.makedirs(results_folder, exist_ok=True)
@@ -224,7 +225,7 @@ def main(seed, seed_number):
         loss = -score  # Negative because we want to maximize the score
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
+        #torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
         optimizer.step()
 
         with torch.no_grad():
