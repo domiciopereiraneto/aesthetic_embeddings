@@ -53,7 +53,7 @@ guidance_scale = 7.5
 height = 256
 width = 256
 
-NUM_ITERATIONS = 20  
+NUM_ITERATIONS = 50000  
 
 float_type = torch.float16
 
