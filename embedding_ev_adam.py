@@ -167,7 +167,7 @@ def aesthetic_evaluation(image):
         score = aesthetic_model.predict_from_tensor(image_input, data_type=float_type)
     elif predictor == 1:
         # LAION Aesthetic Predictor
-        score = aesthetic_model.predict(image_input)
+        score = aesthetic_model.predict_from_tensor(image_input)
     elif predictor == 2:
         # NIMA
         score = aesthetic_model.predict(image_input)
