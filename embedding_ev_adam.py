@@ -13,6 +13,7 @@ import argparse
 import os
 import matplotlib.pyplot as plt
 import time
+from torch.cuda.amp import autocast, GradScaler  # Import AMP utilities
 
 parser = argparse.ArgumentParser(description='Receives argument seed (int).')
 
@@ -55,16 +56,17 @@ width = 256
 
 NUM_ITERATIONS = 50000  
 
-float_type = torch.float16
-
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
 model_id = "CompVis/stable-diffusion-v1-4"
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=float_type).to(device)
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)
+
+# Set text_encoder to float32 for better precision
+pipe.text_encoder.to(torch.float32)
 
 # Define the scheduler
 pipe.scheduler.set_timesteps(num_inference_steps)
@@ -101,6 +103,8 @@ else:
         seed_list = [int(line.strip()) for line in file]
 
 def generate_image_from_embeddings(text_embeddings, seed):
+    # Ensure text_embeddings are in float32
+    text_embeddings = text_embeddings.to(torch.float32)
 
     # Create unconditional embeddings for classifier-free guidance
     uncond_input = pipe.tokenizer(
@@ -111,9 +115,12 @@ def generate_image_from_embeddings(text_embeddings, seed):
         truncation=True
     ).to(device)
     uncond_embeddings = pipe.text_encoder(uncond_input.input_ids.to(device))[0]
+    # uncond_embeddings are in float32
 
     # Concatenate the unconditional and text embeddings
     encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings], dim=0)
+    # Cast encoder_hidden_states to float16 for the UNet
+    encoder_hidden_states = encoder_hidden_states.to(torch.float16)
 
     # Fix the initial latents
     generator = torch.Generator(device=device)
@@ -122,7 +129,7 @@ def generate_image_from_embeddings(text_embeddings, seed):
         (1, pipe.unet.config.in_channels, height // 8, width // 8),
         generator=generator,
         device=device,
-        dtype=float_type
+        dtype=torch.float16  # Use float16 for latents
     )
 
     # Denoising loop
@@ -159,12 +166,12 @@ def generate_image_from_embeddings(text_embeddings, seed):
 
 def aesthetic_evaluation(image):
     # image is a tensor of shape [H, W, C]
-    # Depending on the model, adjust preprocessing
-    image_input = image.permute(2, 0, 1)  # [1, C, H, W]
+    # Convert to [N, C, H, W] and ensure it's in float32
+    image_input = image.permute(2, 0, 1).to(torch.float32)  # [1, C, H, W]
 
     if predictor == 0:
         # Simulacra Aesthetic Model
-        score = aesthetic_model.predict_from_tensor(image_input, data_type=float_type)
+        score = aesthetic_model.predict_from_tensor(image_input)
     elif predictor == 1:
         # LAION Aesthetic Predictor
         score = aesthetic_model.predict_from_tensor(image_input)
@@ -206,7 +213,9 @@ def main(seed, seed_number):
 
     optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
 
-    results_folder = f"results_adam_{model_name}_{seed}"
+    scaler = GradScaler()  # Initialize the GradScaler for AMP
+
+    results_folder = f"results_embedding_opt_adam/results_{model_name}_{seed}"
     os.makedirs(results_folder, exist_ok=True)
 
     max_fit_list = []
@@ -220,17 +229,22 @@ def main(seed, seed_number):
 
         optimizer.zero_grad()
 
-        image = generate_image_from_embeddings(text_embeddings, seed)
-        score = aesthetic_evaluation(image)
-        loss = -score  # Negative because we want to maximize the score
+        with autocast():  # Enable autocasting
+            image = generate_image_from_embeddings(text_embeddings, seed)
+            score = aesthetic_evaluation(image)
+            loss = -score  # Negative because we want to maximize the score
 
-        loss.backward()
-        #torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
-        optimizer.step()
+        scaler.scale(loss).backward()  # Scale the loss and backward pass
+        torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
+        scaler.step(optimizer)
+        scaler.update()
 
         with torch.no_grad():
-            norm = text_embeddings.norm(p=2, dim=-1, keepdim=True)
-            text_embeddings.copy_(text_embeddings / norm.clamp(min=1e-8))
+            # Normalize text_embeddings to prevent gradient explosion
+            text_embeddings.copy_((text_embeddings - text_embeddings.mean()) / text_embeddings.std())
+            if torch.any(torch.isnan(text_embeddings)):
+                print("Gradient explosion detected.")
+                break
 
         if score.item() > best_score:
             best_score = score.item()
@@ -238,7 +252,7 @@ def main(seed, seed_number):
 
         max_fit_list.append(score.item())
 
-        with torch.no_grad():
+        with torch.no_grad(), autocast():
             best_image = generate_image_from_embeddings(best_text_embeddings, seed)
         best_image_np = best_image.detach().cpu().numpy()
         best_image_np = (best_image_np * 255).astype(np.uint8)
@@ -257,7 +271,7 @@ def main(seed, seed_number):
         print(f"Seed {seed_number} Iteration {iteration}/{NUM_ITERATIONS}: Score: {score.item()}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
-    with torch.no_grad():
+    with torch.no_grad(), autocast():
         best_image = generate_image_from_embeddings(best_text_embeddings, seed)
     best_image_np = best_image.detach().cpu().numpy()
     best_image_np = (best_image_np * 255).astype(np.uint8)
