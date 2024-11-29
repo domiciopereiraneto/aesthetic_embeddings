@@ -211,7 +211,7 @@ def main(seed, seed_number):
     text_embeddings_init = pipe.text_encoder(text_input.input_ids.to(device))[0]
     text_embeddings = torch.nn.Parameter(text_embeddings_init.clone())
 
-    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
+    optimizer = torch.optim.Adam([text_embeddings], lr=1e-5, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
 
     scaler = GradScaler()  # Initialize the GradScaler for AMP
 
@@ -221,6 +221,12 @@ def main(seed, seed_number):
     max_fit_list = []
     best_score = -float('inf')
     best_text_embeddings = None
+
+    mean_grad_list = []
+    # std_grad_list = []
+    # max_grad_list = []
+    # min_grad_list = []
+    total_norm_list = []
 
     start_time = time.time()
 
@@ -235,7 +241,22 @@ def main(seed, seed_number):
             loss = -score  # Negative because we want to maximize the score
 
         scaler.scale(loss).backward()  # Scale the loss and backward pass
+
+        mean_grad = text_embeddings.grad.mean()
+        # std_grad = text_embeddings.grad.std()
+        # max_grad = text_embeddings.grad.max()
+        # min_grad = text_embeddings.grad.min()
+        total_norm = 0
+        if text_embeddings.grad is not None:
+            param_norm = text_embeddings.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** 0.5
+
+        mean_grad_list.append(mean_grad)
+        total_norm_list.append()
+
         torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
+        torch.nn.utils.clip_grad_value_([text_embeddings], 10)
         scaler.step(optimizer)
         scaler.update()
 
@@ -252,12 +273,10 @@ def main(seed, seed_number):
 
         max_fit_list.append(score.item())
 
-        with torch.no_grad(), autocast():
-            best_image = generate_image_from_embeddings(best_text_embeddings, seed)
-        best_image_np = best_image.detach().cpu().numpy()
-        best_image_np = (best_image_np * 255).astype(np.uint8)
-        pil_image = Image.fromarray(best_image_np)
-        pil_image.save(f"{results_folder}/best_{iteration}.png")
+        image_np = image.detach().clone().cpu().numpy()
+        image_np = (image_np * 255).astype(np.uint8)
+        pil_image = Image.fromarray(image_np)
+        pil_image.save(f"{results_folder}/it_{iteration}.png")
 
         elapsed_time = time.time() - start_time
         iterations_done = iteration
@@ -282,6 +301,8 @@ def main(seed, seed_number):
     results = pd.DataFrame({
         "iteration": list(range(1, NUM_ITERATIONS + 1)),
         "score": max_fit_list,
+        "mean_grad": mean_grad_list,
+        "total_grad_norm": total_norm_list
     })
 
     results.to_csv(f"{results_folder}/fitness_results.csv", index=False)
