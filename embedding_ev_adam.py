@@ -252,8 +252,8 @@ def main(seed, seed_number):
             total_norm += param_norm.item() ** 2
         total_norm = total_norm ** 0.5
 
-        mean_grad_list.append(mean_grad)
-        total_norm_list.append()
+        mean_grad_list.append(mean_grad.cpu().numpy())
+        total_norm_list.append(total_norm)
 
         torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
         torch.nn.utils.clip_grad_value_([text_embeddings], 10)
@@ -305,7 +305,7 @@ def main(seed, seed_number):
         "total_grad_norm": total_norm_list
     })
 
-    results.to_csv(f"{results_folder}/fitness_results.csv", index=False)
+    results.to_csv(f"{results_folder}/fitness_results.csv", index=False, na_rep='nan')
 
     # Plot and save the fitness evolution
     plot_results(results, results_folder)
