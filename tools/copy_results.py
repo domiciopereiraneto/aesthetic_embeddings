@@ -2,18 +2,18 @@ import os
 import shutil
 
 # Define source directory containing the result folders
-source_dir = './'
+source_dir = 'results_embedding_opt_adam'
 # Define destination directory for the copied folders
-destination_dir = './results_adam_latents_opt'
+destination_dir = 'results_embedding_opt_adam_copy'
 
 # List of specific files to copy
 files_to_copy = [
-    "best_1.png",
-    "best_10000.png",
-    "best_20000.png",
-    "best_30000.png",
-    "best_40000.png",
-    "best_50000.png",
+    "it_1.png",
+    "it_10000.png",
+    "it_20000.png",
+    "it_30000.png",
+    "it_40000.png",
+    "it_50000.png",
     "best_all.png",
     "fitness_evolution.png",
     "fitness_results.csv"
@@ -25,7 +25,7 @@ os.makedirs(destination_dir, exist_ok=True)
 # Iterate over all folders in the source directory
 for folder_name in os.listdir(source_dir):
     folder_path = os.path.join(source_dir, folder_name)
-    if os.path.isdir(folder_path) and folder_name.startswith("results_adam_SAM_"):
+    if os.path.isdir(folder_path) and folder_name.startswith("results_LAION_"):
         # Create the corresponding folder in the destination directory
         dest_folder_path = os.path.join(destination_dir, folder_name)
         os.makedirs(dest_folder_path, exist_ok=True)
