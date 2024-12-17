@@ -49,12 +49,11 @@ else:
     predictor = 0  # Set default to SAM
 
 num_inference_steps = 30
-guidance_scale = 7.5
-# Height and width of the images
+guidance_scale = 10
 height = 256
 width = 256
 
-NUM_ITERATIONS = 50000  
+NUM_ITERATIONS = 100  
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
@@ -102,9 +101,20 @@ else:
         # Read each line, strip newline characters, and convert to integers
         seed_list = [int(line.strip()) for line in file]
 
-def generate_image_from_embeddings(text_embeddings, seed):
+def generate_image_from_embeddings(text_embeddings_initial, seed):
     # Ensure text_embeddings are in float32
-    text_embeddings = text_embeddings.to(torch.float32)
+    text_embeddings_initial = text_embeddings_initial.to(torch.float32)
+
+    text_tokens_padding = pipe.tokenizer(
+        "",
+        return_tensors="pt",
+        padding="max_length",
+        max_length=67,
+        truncation=True
+    ).to(device)
+    text_embeddings_padding = pipe.text_encoder(text_tokens_padding.input_ids.to(device))[0]
+
+    text_embeddings = torch.cat([text_embeddings_initial, text_embeddings_padding], dim=1)
 
     # Create unconditional embeddings for classifier-free guidance
     uncond_input = pipe.tokenizer(
@@ -202,16 +212,16 @@ def main(seed, seed_number):
 
     # Initialize the text embeddings with an empty prompt
     text_input = pipe.tokenizer(
-        "",
+        "pretty sunset",
         return_tensors="pt",
         padding="max_length",
-        max_length=77,
+        max_length=10,
         truncation=True
     ).to(device)
     text_embeddings_init = pipe.text_encoder(text_input.input_ids.to(device))[0]
     text_embeddings = torch.nn.Parameter(text_embeddings_init.clone())
 
-    optimizer = torch.optim.Adam([text_embeddings], lr=1e-5, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
+    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=0, eps=1e-8)  # Adjust learning rate as needed
 
     scaler = GradScaler()  # Initialize the GradScaler for AMP
 
@@ -238,7 +248,8 @@ def main(seed, seed_number):
         with autocast():  # Enable autocasting
             image = generate_image_from_embeddings(text_embeddings, seed)
             score = aesthetic_evaluation(image)
-            loss = -score  # Negative because we want to maximize the score
+            loss = 1/(1+score)  # Negative because we want to maximize the score
+            #loss = score/10
 
         scaler.scale(loss).backward()  # Scale the loss and backward pass
 

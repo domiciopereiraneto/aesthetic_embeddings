@@ -27,7 +27,7 @@ def save_plot_results(results, results_folder):
 
 
 # Load the aggregated data from the Excel file
-aggregated_file = "results_adam_SAM_opt/aggregated_fitness_results.xlsx"
+aggregated_file = "results_embedding_opt_adam_copy/aggregated_score_results.xlsx"
 data = pd.read_excel(aggregated_file)
 
 # Calculate the average fitness across all seeds for each iteration
@@ -39,7 +39,7 @@ data['std_score'] = data.filter(like='score_').std(axis=1)
 # Calculate the average fitness across all seeds for each iteration
 data['max_score'] = data.filter(like='score_').max(axis=1)
 
-save_plot_results(data, "results_adam_SAM_opt")
+save_plot_results(data, "results_embedding_opt_adam_copy")
 
 # Plot the average fitness with error bars (standard deviation)
 # plt.figure(figsize=(10, 6))
@@ -60,6 +60,6 @@ save_plot_results(data, "results_adam_SAM_opt")
 # plt.savefig("results_adam_SAM_opt/aggregated_aesthetic_score_evolution.png")
 
 # Save the updated data with average and standard deviation columns to a new file
-output_file = "results_adam_SAM_opt/aggregated_fitness_with_stats.xlsx"
+output_file = "results_embedding_opt_adam_copy/aggregated_score_with_stats.xlsx"
 data.to_excel(output_file, index=False)
 print(f"Updated data saved to {output_file}")

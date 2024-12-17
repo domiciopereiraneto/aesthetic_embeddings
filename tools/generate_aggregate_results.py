@@ -2,21 +2,23 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "../results_adam_SAM_opt"
-output_file = "../results_adam_SAM_opt/aggregated_fitness_results.xlsx"
+base_dir = "results_embedding_opt_adam_copy"
+output_file = "results_embedding_opt_adam_copy/aggregated_score_results.xlsx"
 
 # Initialize aggregated_data as None
 aggregated_data = None
 
 # Iterate over all subdirectories
 for folder_name in os.listdir(base_dir):
-    if folder_name.startswith("results_adam_SAM_"):
+    if folder_name.startswith("results_LAION_"):
         seed = folder_name.split("_")[-1]  # Extract the seed number
         file_path = os.path.join(base_dir, folder_name, "fitness_results.csv")
         
         if os.path.exists(file_path):
             # Read the CSV file
             df = pd.read_csv(file_path)
+
+            df = df.drop(columns=["mean_grad","total_grad_norm"])
             
             # Ensure the iteration column exists
             if "iteration" not in df.columns:
