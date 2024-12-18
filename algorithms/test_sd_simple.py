@@ -1,16 +1,17 @@
 import torch
 from diffusers import StableDiffusionPipeline
 from PIL import Image
+import os
 
 device = "cuda:1"
 
 # Load the pre-trained Stable Diffusion model
 model_id = "CompVis/stable-diffusion-v1-4"
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to(device)
 
 # Define the prompt for image generation
-prompt = "A fantasy landscape with mountains, a river, and a castle"
-num_inference_steps = 50
+prompt = "Beautiful sunset"
+num_inference_steps = 7
 guidance_scale = 7.5
 height = 512
 width = 512
@@ -31,7 +32,7 @@ encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings])
 SEED = 42
 generator = torch.Generator(device=device)
 generator.manual_seed(SEED)
-latents = torch.randn((1, pipe.unet.in_channels, height // 8, width // 8), generator=generator, device=device, requires_grad=False)
+latents = torch.randn((1, pipe.unet.in_channels, height // 8, width // 8), generator=generator, device=device, requires_grad=False, dtype=torch.float16)
 
 # Define the scheduler
 pipe.scheduler.set_timesteps(num_inference_steps)
@@ -64,7 +65,8 @@ image = (image * 255).round().astype("uint8")
 image = Image.fromarray(image[0])
 
 # Save the generated image to disk
-output_path = "test.png"
+os.makedirs("results/test", exist_ok=True)
+output_path = "results/test/test.png"
 image.save(output_path)
 
 # Display the image
