@@ -217,6 +217,7 @@ def main(seed, seed_number):
 
     score_list = [initial_score.item()]
     loss_list = [initial_loss.item()]
+    time_list = [0]
     best_score = initial_score
     best_text_embeddings = text_embeddings_init.detach().clone()
 
@@ -276,13 +277,16 @@ def main(seed, seed_number):
 
         formatted_time_remaining = format_time(estimated_time_remaining)
 
+        time_list.append(elapsed_time)
+
         # Save the metrics
         results = pd.DataFrame({
             "iteration": list(range(0, iteration + 1)),
             "score": score_list,
             "loss": loss_list,
             "mean_grad": mean_grad_list,
-            "total_grad_norm": total_norm_list
+            "total_grad_norm": total_norm_list,
+            "elapsed_time": time_list
         })
 
         results.to_csv(f"{results_folder}/score_results.csv", index=False, na_rep='nan')
