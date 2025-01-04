@@ -65,7 +65,7 @@ class LAIONAesthetic():
         return img_tensor  # [1, 3, 224, 224]
 
     def predict_from_pil(self, pil_image):
-        image = self.preprocess(pil_image).unsqueeze(0)
+        image = self.preprocess(pil_image).unsqueeze(0).to(self.device)
         with torch.no_grad():
             image_features = self.clip.encode_image(image)
             image_features /= image_features.norm(dim=-1, keepdim=True)

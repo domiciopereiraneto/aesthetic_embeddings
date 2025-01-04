@@ -5,13 +5,13 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 
 # Define source directory containing the result folders
-source_dir = 'results_embedding_opt_adam_copy'
+source_dir = 'results/test_2'
 # Output file for the grid
-output_grid_path = 'results_embedding_opt_adam_copy/best_all_grid.png'
+output_grid_path = 'results/test_2/best_all_grid.png'
 
 # Grid dimensions
-x_rows = 6
-y_columns = 5
+x_rows = 5
+y_columns = 6
 
 # Initialize lists for seeds, scores, and image paths
 seed_info = []
@@ -25,7 +25,7 @@ for folder_name in os.listdir(source_dir):
         
         # Locate the image and CSV file
         image_path = os.path.join(folder_path, "best_all.png")
-        csv_path = os.path.join(folder_path, "fitness_results.csv")
+        csv_path = os.path.join(folder_path, "score_results.csv")
         
         if os.path.isfile(image_path) and os.path.isfile(csv_path):
             # Read the score from the CSV file

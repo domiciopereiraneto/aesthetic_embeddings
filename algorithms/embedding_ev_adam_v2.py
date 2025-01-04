@@ -50,15 +50,15 @@ if args.cuda is not None:
     cuda_n = str(args.cuda)
 else:
     print("CUDA device not provided, default is 0")
-    cuda_n = str(1)
+    cuda_n = str(0)
 
 if args.predictor is not None:
     predictor = args.predictor
 else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 0  # Set default to SAM
+    predictor = 1  # Set default to SAM
 
-num_inference_steps = 13
+num_inference_steps = 11
 guidance_scale = 7.5
 # Height and width of the images
 height = 512
@@ -70,7 +70,9 @@ NUM_ITERATIONS = 1000
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
-model_id = "CompVis/stable-diffusion-v1-4"
+#model_id = "CompVis/stable-diffusion-v1-4"
+model_id = "sd-legacy/stable-diffusion-v1-5"
+#model_id = "stabilityai/stable-diffusion-2-1"
 pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)

@@ -6,15 +6,16 @@ import os
 device = "cuda:1"
 
 # Load the pre-trained Stable Diffusion model
-model_id = "CompVis/stable-diffusion-v1-4"
+#model_id = "CompVis/stable-diffusion-v1-4"
+model_id = "stabilityai/stable-diffusion-2-1"
 pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to(device)
 
 # Define the prompt for image generation
 prompt = "Beautiful sunset"
-num_inference_steps = 7
+num_inference_steps = 12
 guidance_scale = 7.5
-height = 512
-width = 512
+height = 768
+width = 768
 
 # Encode the prompt text
 text_input = pipe.tokenizer(prompt, return_tensors="pt", padding="max_length", max_length=77, truncation=True).to(device)
