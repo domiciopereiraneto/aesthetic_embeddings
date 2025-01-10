@@ -10,3 +10,6 @@
 [submodule "image-quality-assessment"]
 	path = image-quality-assessment
 	url = https://github.com/idealo/image-quality-assessment.git
+[submodule "Neural-IMage-Assessment"]
+	path = Neural-IMage-Assessment
+	url = https://github.com/yunxiaoshi/Neural-IMage-Assessment.git
