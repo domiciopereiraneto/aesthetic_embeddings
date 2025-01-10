@@ -5,9 +5,9 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 
 # Define source directory containing the result folders
-source_dir = 'results/test_2'
+source_dir = 'results/adam_embedding_sam'
 # Output file for the grid
-output_grid_path = 'results/test_2/best_all_grid.png'
+output_grid_path = 'results/adam_embedding_sam/best_all_grid.png'
 
 # Grid dimensions
 x_rows = 5
@@ -19,7 +19,7 @@ seed_info = []
 # Iterate over folders
 for folder_name in os.listdir(source_dir):
     folder_path = os.path.join(source_dir, folder_name)
-    if os.path.isdir(folder_path) and folder_name.startswith("results_LAION_"):
+    if os.path.isdir(folder_path) and folder_name.startswith("results_SAM_"):
         # Extract the seed number from the folder name
         seed_number = folder_name.split("_")[-1]
         
@@ -39,7 +39,7 @@ for folder_name in os.listdir(source_dir):
             print(f"Missing required files in {folder_name}")
 
 # Sort by seed number (optional)
-seed_info.sort(key=lambda x: int(x[0]))
+seed_info.sort(key=lambda x: float(x[1]))
 
 # Create the grid
 fig, axes = plt.subplots(x_rows, y_columns, figsize=(y_columns * 3, x_rows * 3))

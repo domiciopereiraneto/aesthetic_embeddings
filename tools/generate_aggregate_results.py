@@ -2,15 +2,15 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "results/test_2"
-output_file = "results/test_2/aggregated_score_results.xlsx"
+base_dir = "results/test"
+output_file = "results/test/aggregated_score_results.xlsx"
 
 # Initialize aggregated_data as None
 aggregated_data = None
 
 # Iterate over all subdirectories
 for folder_name in os.listdir(base_dir):
-    if folder_name.startswith("results_LAION_"):
+    if folder_name.startswith("results_SAM_"):
         seed = folder_name.split("_")[-1]  # Extract the seed number
         file_path = os.path.join(base_dir, folder_name, "score_results.csv")
         

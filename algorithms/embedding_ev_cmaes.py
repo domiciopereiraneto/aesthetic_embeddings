@@ -22,8 +22,7 @@ import nima_rank_image
 import simulacra_rank_image
 import laion_rank_image
 
-# Half Precision
-from torch.cuda.amp import autocast, GradScaler
+import cma
 
 parser = argparse.ArgumentParser(description='Receives argument seed (int).')
 
@@ -56,7 +55,7 @@ if args.predictor is not None:
     predictor = args.predictor
 else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 1  # Set default to SAM
+    predictor = 0  # Set default to SAM
 
 num_inference_steps = 11
 guidance_scale = 7.5
@@ -64,7 +63,8 @@ guidance_scale = 7.5
 height = 512
 width = 512
 
-NUM_ITERATIONS = 1000  
+NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
+SIGMA = 0.1
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
@@ -100,9 +100,6 @@ elif predictor == 2:
     supports_grad = True
 else:
     raise ValueError("Invalid predictor option.")
-
-if not supports_grad:
-    raise ValueError(f"The selected aesthetic model '{model_name}' does not support backpropagation required for gradient-based optimization.")
 
 if SEED_PATH is None:
     seed_list = [SEED]
@@ -188,12 +185,32 @@ def format_time(seconds):
     else:
         return f"{seconds}s"
 
+def evaluate(x, seed, initial_embedding):
+    # x is a NumPy array representing the embedding vector
+    # Convert it to a torch tensor
+    with torch.no_grad():
+        embedding = torch.tensor(x, dtype=torch.float32, device=device)
+        # Reshape the embedding to the original shape
+        embedding = embedding.view(initial_embedding.shape)
+        image = generate_image_from_embeddings(embedding, seed)
+        score = aesthetic_evaluation(image)[0].item()
+    # CMA-ES minimizes the function, so we need to invert the score if higher is better
+    return -score  # Negate the score to turn maximization into minimization
+
+def normalize_embedding_vector(x):
+    x_mean = np.mean(x)
+    x_std = np.std(x)
+    if x_std == 0:
+        x_std = 1e-8  # Prevent division by zero
+    x_normalized = (x - x_mean) / x_std
+    return x_normalized
+
 def main(seed, seed_number):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    results_folder = f"results/test/results_{model_name}_{seed}"
+    results_folder = f"results/test_4/results_{model_name}_{seed}"
     os.makedirs(results_folder, exist_ok=True)
 
     # Initialize the text embeddings with an empty prompt
@@ -205,7 +222,21 @@ def main(seed, seed_number):
         truncation=True
     ).to(device)
     text_embeddings_init = pipe.text_encoder(text_input.input_ids.to(device))[0]
-    text_embeddings = torch.nn.Parameter(text_embeddings_init.clone())
+    embedding_size = text_embeddings_init.numel()
+    initial_embedding = text_embeddings_init.detach().cpu().numpy().flatten()    
+
+    # Set CMA-ES options
+    es_options = {
+        'seed': seed,
+        'popsize': POP_SIZE,
+        'maxiter': NUM_GENERATIONS,
+        'verb_filenameprefix': results_folder + '/outcmaes',  # Save logs
+        'verb_log': 0,  # Disable log output
+        'verbose': -9,  # Suppress console output
+    }
+
+    # Initialize CMA-ES
+    es = cma.CMAEvolutionStrategy(initial_embedding, SIGMA, es_options)
 
     with torch.no_grad():
         initial_image = generate_image_from_embeddings(text_embeddings_init, seed)
@@ -214,68 +245,72 @@ def main(seed, seed_number):
         pil_image = Image.fromarray(image_np)
         pil_image.save(f"{results_folder}/it_0.png")
 
-        initial_score = aesthetic_evaluation(initial_image)
-        initial_loss = 1/(1+initial_score)  # Negative because we want to maximize the score
+        initial_score = aesthetic_evaluation(initial_image)[0].item()
 
-    score_list = [initial_score.item()]
-    loss_list = [initial_loss.item()]
     time_list = [0]
-    best_score = initial_score
-    best_text_embeddings = text_embeddings_init.detach().clone()
-
-    mean_grad_list = [0]
-    total_norm_list = [0]
-
-    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
-
-    scaler = GradScaler()  # Initialize GradScaler for mixed precision training
+    best_score_overall = initial_score
+    best_text_embeddings_overall = text_embeddings_init
 
     start_time = time.time()
+    generation = 0
 
-    for iteration in range(1, NUM_ITERATIONS + 1):
-        print(f"Iteration {iteration}/{NUM_ITERATIONS}")
+    max_fit_list = [initial_score]
+    avg_fit_list = [initial_score]
+    std_fit_list = [0]
+    best_list = [initial_score]
 
-        optimizer.zero_grad()
+    while not es.stop():
+        print(f"Generation {generation+1}/{NUM_GENERATIONS}")
+        # Ask for new candidate solutions
+        solutions = es.ask()
+        solutions = [normalize_embedding_vector(x) for x in solutions]
+        # Evaluate candidate solutions
+        fitnesses = []
+        for x in solutions:
+            fitness = evaluate(x, seed, text_embeddings_init)
+            fitnesses.append(fitness)
+        # Tell CMA-ES the fitnesses
+        es.tell(solutions, fitnesses)
 
-        with autocast(dtype=torch.float16):
-            image = generate_image_from_embeddings(text_embeddings, seed)
-            score = aesthetic_evaluation(image)
-            loss = 1/(1+score)  # Negative because we want to maximize the score
+        # Record statistics
+        scores = [-f for f in fitnesses]  # Convert back to positive scores
 
-        #loss.backward()
-        #optimizer.step()
+        # Record statistics
+        scores = [-f for f in fitnesses]  # Convert back to positive scores
+        max_fit = max(scores)
+        avg_fit = np.mean(scores)
+        std_fit = np.std(scores)
 
-        scaler.scale(loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
+        max_fit_list.append(max_fit)
+        avg_fit_list.append(avg_fit)
+        std_fit_list.append(std_fit)
 
-        mean_grad = text_embeddings.grad.mean()
-        total_norm = 0
-        if text_embeddings.grad is not None:
-            param_norm = text_embeddings.grad.data.norm(2)
-            total_norm += param_norm.item() ** 2
-        total_norm = total_norm ** 0.5
+        # Get best solution so far
+        best_x = es.result.xbest
+        best_score = -es.result.fbest  # Convert back to positive score
+        best_list.append(best_score)
 
-        mean_grad_list.append(mean_grad.cpu().numpy())
-        total_norm_list.append(total_norm)
+        with torch.no_grad():
+            # Generate and save the best image
+            best_text_embeddings = torch.tensor(best_x, dtype=torch.float32, device=device)
+            best_text_embeddings = best_text_embeddings.view(text_embeddings_init.shape)
+            best_image = generate_image_from_embeddings(best_text_embeddings, seed)
+            image_np = best_image.detach().clone().cpu().numpy()
+            image_np = (image_np * 255).astype(np.uint8)
+            pil_image = Image.fromarray(image_np)
+            pil_image.save(results_folder + "/best_%d.png" % (generation+1))
 
-        if score.item() > best_score:
-            best_score = score.item()
-            best_text_embeddings = text_embeddings.detach().clone()
+        if best_score > best_score_overall:
+            best_score_overall = best_score
+            best_text_embeddings_overall = best_text_embeddings
 
-        score_list.append(score.item())
-        loss_list.append(loss.item())
-
-        image_np = image.detach().clone().cpu().numpy()
-        image_np = (image_np * 255).astype(np.uint8)
-        pil_image = Image.fromarray(image_np)
-        pil_image.save(f"{results_folder}/it_{iteration}.png")
+        generation += 1
 
         elapsed_time = time.time() - start_time
-        iterations_done = iteration
-        iterations_left = NUM_ITERATIONS - iteration
-        average_time_per_iteration = elapsed_time / iterations_done
-        estimated_time_remaining = average_time_per_iteration * iterations_left
+        generations_done = generation
+        generations_left = NUM_GENERATIONS - generations_done
+        average_time_per_generation = elapsed_time / generations_done
+        estimated_time_remaining = average_time_per_generation * generations_left
 
         formatted_time_remaining = format_time(estimated_time_remaining)
 
@@ -283,50 +318,52 @@ def main(seed, seed_number):
 
         # Save the metrics
         results = pd.DataFrame({
-            "iteration": list(range(0, iteration + 1)),
-            "score": score_list,
-            "loss": loss_list,
-            "mean_grad": mean_grad_list,
-            "total_grad_norm": total_norm_list,
+            "generation": list(range(0, generation + 1)),
+            "avg_fitness": avg_fit_list,
+            "std_fitness": std_fit_list,
+            "max_fitness": max_fit_list,
             "elapsed_time": time_list
         })
 
-        results.to_csv(f"{results_folder}/score_results.csv", index=False, na_rep='nan')
+        results.to_csv(f"{results_folder}/fitness_results.csv", index=False, na_rep='nan')
 
         # Plot and save the fitness evolution
-        plot_results(results, results_folder)
+        save_plot_results(results, results_folder)
 
         # Print stats
-        print(f"Seed {seed_number} Iteration {iteration}/{NUM_ITERATIONS}: Score: {score.item()}, Estimated time remaining: {formatted_time_remaining}")
+        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max fitness: {max_fit}, Avg fitness: {avg_fit}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
     with torch.no_grad():
-        best_image = generate_image_from_embeddings(best_text_embeddings, seed)
+        best_image = generate_image_from_embeddings(best_text_embeddings_overall, seed)
     best_image_np = best_image.detach().cpu().numpy()
     best_image_np = (best_image_np * 255).astype(np.uint8)
     pil_image = Image.fromarray(best_image_np)
     pil_image.save(f"{results_folder}/best_all.png")
 
-def plot_results(results, results_folder):
-    plt.figure()
-    plt.plot(results['iteration'], results['score'], label="Score")
-    plt.xlabel('Iteration')
-    plt.ylabel('Score')
-    plt.title('Score over Iterations')
-    plt.grid()
-    plt.legend()
-    plt.savefig(results_folder + "/score_evolution.png")
-    plt.close()
+def plot_mean_std(x_axis, m_vec, std_vec, description, title=None, y_label=None, x_label=None):
+    lower_bound = [M_new - Sigma for M_new, Sigma in zip(m_vec, std_vec)]
+    upper_bound = [M_new + Sigma for M_new, Sigma in zip(m_vec, std_vec)]
 
+    plt.plot(x_axis, m_vec, '--', label=description + " Avg.")
+    plt.fill_between(x_axis, lower_bound, upper_bound, alpha=.3, label=description + " Avg. ± SD")
+    if title is not None:
+        plt.title(title)
+    if y_label is not None:
+        plt.ylabel(y_label)
+    if x_label is not None:
+        plt.xlabel(x_label)
+
+def save_plot_results(results, results_folder):
     plt.figure()
-    plt.plot(results['iteration'], results['loss'], label="Loss")
-    plt.xlabel('Iteration')
-    plt.ylabel('Loss')
-    plt.title('Loss over Iterations')
+    plot_mean_std(results['generation'], results['avg_fitness'], results['std_fitness'], "Population")
+    plt.plot(results['generation'], results['max_fitness'], 'r-', label="Best")
+    plt.ylim(0, 10)
+    plt.xlabel('Generation')
+    plt.ylabel('Fitness (Aesthetic Score)')
     plt.grid()
     plt.legend()
-    plt.savefig(results_folder + "/loss_evolution.png")
-    plt.close()
+    plt.savefig(results_folder + "/fitness_evolution.png")
 
 if __name__ == "__main__":
     i = 1

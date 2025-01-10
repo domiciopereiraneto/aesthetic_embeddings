@@ -20,7 +20,7 @@ def save_plot_results_score(results, results_folder):
     plt.plot(results['iteration'], results['max_score'], 'r-', label="Best")
     plt.ylim(0, 15)
     plt.xlabel('Iteration')
-    plt.ylabel('Aesthetic Score')
+    plt.ylabel('Aesthetic Score (SAM)')
     plt.grid()
     plt.legend()
     plt.savefig(results_folder + "/aesthetic_evolution.png")
@@ -31,7 +31,7 @@ def save_plot_results_loss(results, results_folder):
     plt.plot(results['iteration'], results['min_loss'], 'r-', label="Best")
     plt.ylim(0, 1)
     plt.xlabel('Iteration')
-    plt.ylabel('Aesthetic Loss')
+    plt.ylabel('Loss')
     plt.grid()
     plt.legend()
     plt.savefig(results_folder + "/loss_evolution.png")
@@ -58,8 +58,8 @@ data['std_loss'] = data.filter(like='loss_').std(axis=1)
 # Calculate the average fitness across all seeds for each iteration
 data['min_loss'] = data.filter(like='loss_').min(axis=1)
 
-save_plot_results_score(data, "results/test_2")
-save_plot_results_loss(data, "results/test_2")
+save_plot_results_score(data, "results/test")
+save_plot_results_loss(data, "results/test")
 
 # Plot the average fitness with error bars (standard deviation)
 # plt.figure(figsize=(10, 6))
@@ -80,6 +80,6 @@ save_plot_results_loss(data, "results/test_2")
 # plt.savefig("results_adam_SAM_opt/aggregated_aesthetic_score_evolution.png")
 
 # Save the updated data with average and standard deviation columns to a new file
-output_file = "results/test_2/aggregated_score_with_stats.xlsx"
+output_file = "results/test/aggregated_score_with_stats.xlsx"
 data.to_excel(output_file, index=False)
 print(f"Updated data saved to {output_file}")

@@ -1,3 +1,11 @@
+import sys
+import os
+
+# Get the parent directory
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Add the parent directory to sys.path to obtain access to the submolues
+sys.path.insert(0, parent_dir)
+
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -5,15 +13,17 @@ import pandas as pd
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 import random
 from PIL import Image
-# Import your aesthetic models here
+import argparse
+import matplotlib.pyplot as plt
+import time
+
+# Aesthetic Evaluators
 import nima_rank_image
 import simulacra_rank_image
 import laion_rank_image
-import argparse
-import os
-import matplotlib.pyplot as plt
-import time
-from torch.cuda.amp import autocast, GradScaler  # Import AMP utilities
+
+# Half Precision
+from torch.cuda.amp import autocast, GradScaler
 
 parser = argparse.ArgumentParser(description='Receives argument seed (int).')
 
@@ -46,27 +56,26 @@ if args.predictor is not None:
     predictor = args.predictor
 else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 0  # Set default to SAM
+    predictor = 1  # Set default to SAM
 
-num_inference_steps = 30
+num_inference_steps = 11
 guidance_scale = 7.5
 # Height and width of the images
-height = 256
-width = 256
+height = 512
+width = 512
 
-NUM_ITERATIONS = 50000  
+NUM_ITERATIONS = 1000  
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
-model_id = "CompVis/stable-diffusion-v1-4"
-pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to(device)
+#model_id = "CompVis/stable-diffusion-v1-4"
+model_id = "sd-legacy/stable-diffusion-v1-5"
+#model_id = "stabilityai/stable-diffusion-2-1"
+pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)
-
-# Set text_encoder to float32 for better precision
-pipe.text_encoder.to(torch.float32)
 
 # Define the scheduler
 pipe.scheduler.set_timesteps(num_inference_steps)
@@ -103,9 +112,6 @@ else:
         seed_list = [int(line.strip()) for line in file]
 
 def generate_image_from_embeddings(text_embeddings, seed):
-    # Ensure text_embeddings are in float32
-    text_embeddings = text_embeddings.to(torch.float32)
-
     # Create unconditional embeddings for classifier-free guidance
     uncond_input = pipe.tokenizer(
         "",
@@ -119,35 +125,23 @@ def generate_image_from_embeddings(text_embeddings, seed):
 
     # Concatenate the unconditional and text embeddings
     encoder_hidden_states = torch.cat([uncond_embeddings, text_embeddings], dim=0)
-    # Cast encoder_hidden_states to float16 for the UNet
-    encoder_hidden_states = encoder_hidden_states.to(torch.float16)
 
     # Fix the initial latents
     generator = torch.Generator(device=device)
     generator.manual_seed(seed)  # Use the seed
-    latents_input = torch.randn(
+    latents = torch.randn(
         (1, pipe.unet.config.in_channels, height // 8, width // 8),
         generator=generator,
         device=device,
-        dtype=torch.float16  # Use float16 for latents
+        dtype=torch.float32  # Use float16 for latents
     )
 
     # Denoising loop
     for i, t in enumerate(pipe.scheduler.timesteps):
-        # Expand latents if using guidance
-        latent_model_input = (
-            torch.cat([latents_input] * 2)
-            if guidance_scale > 1.0 else latents_input
-        )
+        # Expand the latents if we are doing classifier-free guidance
+        latent_model_input = torch.cat([latents] * 2) if guidance_scale > 1.0 else latents
 
-        latent_model_input = pipe.scheduler.scale_model_input(latent_model_input, t)
-
-        # Predict noise residual
-        noise_pred = pipe.unet(
-            latent_model_input,
-            t,
-            encoder_hidden_states=encoder_hidden_states
-        )["sample"]
+        noise_pred = pipe.unet(latent_model_input, t, encoder_hidden_states=encoder_hidden_states)["sample"]
 
         # Perform guidance
         if guidance_scale > 1.0:
@@ -155,10 +149,9 @@ def generate_image_from_embeddings(text_embeddings, seed):
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
         # Compute the previous noisy sample x_t -> x_t-1
-        latents_input = pipe.scheduler.step(noise_pred, t, latents_input)["prev_sample"]
+        latents = pipe.scheduler.step(noise_pred, t, latents)["prev_sample"]
 
-    # Decode the image
-    image = pipe.vae.decode(latents_input / pipe.vae.config.scaling_factor)["sample"]
+    image = pipe.vae.decode(latents / pipe.vae.config.scaling_factor)["sample"]
     image = (image / 2 + 0.5).clamp(0, 1)  # Normalize to [0,1]
     image = image.squeeze(0).permute(1, 2, 0)  # Convert to [H, W, C]
 
@@ -200,6 +193,9 @@ def main(seed, seed_number):
     np.random.seed(seed)
     random.seed(seed)
 
+    results_folder = f"results/test/results_{model_name}_{seed}"
+    os.makedirs(results_folder, exist_ok=True)
+
     # Initialize the text embeddings with an empty prompt
     text_input = pipe.tokenizer(
         "",
@@ -211,22 +207,28 @@ def main(seed, seed_number):
     text_embeddings_init = pipe.text_encoder(text_input.input_ids.to(device))[0]
     text_embeddings = torch.nn.Parameter(text_embeddings_init.clone())
 
-    optimizer = torch.optim.Adam([text_embeddings], lr=1e-5, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
+    with torch.no_grad():
+        initial_image = generate_image_from_embeddings(text_embeddings_init, seed)
+        image_np = initial_image.detach().clone().cpu().numpy()
+        image_np = (image_np * 255).astype(np.uint8)
+        pil_image = Image.fromarray(image_np)
+        pil_image.save(f"{results_folder}/it_0.png")
 
-    scaler = GradScaler()  # Initialize the GradScaler for AMP
+        initial_score = aesthetic_evaluation(initial_image)
+        initial_loss = 1/(1+initial_score)  # Negative because we want to maximize the score
 
-    results_folder = f"results_embedding_opt_adam/results_{model_name}_{seed}"
-    os.makedirs(results_folder, exist_ok=True)
+    score_list = [initial_score.item()]
+    loss_list = [initial_loss.item()]
+    time_list = [0]
+    best_score = initial_score
+    best_text_embeddings = text_embeddings_init.detach().clone()
 
-    max_fit_list = []
-    best_score = -float('inf')
-    best_text_embeddings = None
+    mean_grad_list = [0]
+    total_norm_list = [0]
 
-    mean_grad_list = []
-    # std_grad_list = []
-    # max_grad_list = []
-    # min_grad_list = []
-    total_norm_list = []
+    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
+
+    scaler = GradScaler()  # Initialize GradScaler for mixed precision training
 
     start_time = time.time()
 
@@ -235,17 +237,19 @@ def main(seed, seed_number):
 
         optimizer.zero_grad()
 
-        with autocast():  # Enable autocasting
+        with autocast(dtype=torch.float16):
             image = generate_image_from_embeddings(text_embeddings, seed)
             score = aesthetic_evaluation(image)
-            loss = -score  # Negative because we want to maximize the score
+            loss = 1/(1+score)  # Negative because we want to maximize the score
 
-        scaler.scale(loss).backward()  # Scale the loss and backward pass
+        #loss.backward()
+        #optimizer.step()
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         mean_grad = text_embeddings.grad.mean()
-        # std_grad = text_embeddings.grad.std()
-        # max_grad = text_embeddings.grad.max()
-        # min_grad = text_embeddings.grad.min()
         total_norm = 0
         if text_embeddings.grad is not None:
             param_norm = text_embeddings.grad.data.norm(2)
@@ -255,23 +259,12 @@ def main(seed, seed_number):
         mean_grad_list.append(mean_grad.cpu().numpy())
         total_norm_list.append(total_norm)
 
-        torch.nn.utils.clip_grad_norm_([text_embeddings], max_norm=1.0)
-        torch.nn.utils.clip_grad_value_([text_embeddings], 10)
-        scaler.step(optimizer)
-        scaler.update()
-
-        with torch.no_grad():
-            # Normalize text_embeddings to prevent gradient explosion
-            text_embeddings.copy_((text_embeddings - text_embeddings.mean()) / text_embeddings.std())
-            if torch.any(torch.isnan(text_embeddings)):
-                print("Gradient explosion detected.")
-                break
-
         if score.item() > best_score:
             best_score = score.item()
             best_text_embeddings = text_embeddings.detach().clone()
 
-        max_fit_list.append(score.item())
+        score_list.append(score.item())
+        loss_list.append(loss.item())
 
         image_np = image.detach().clone().cpu().numpy()
         image_np = (image_np * 255).astype(np.uint8)
@@ -286,29 +279,33 @@ def main(seed, seed_number):
 
         formatted_time_remaining = format_time(estimated_time_remaining)
 
+        time_list.append(elapsed_time)
+
+        # Save the metrics
+        results = pd.DataFrame({
+            "iteration": list(range(0, iteration + 1)),
+            "score": score_list,
+            "loss": loss_list,
+            "mean_grad": mean_grad_list,
+            "total_grad_norm": total_norm_list,
+            "elapsed_time": time_list
+        })
+
+        results.to_csv(f"{results_folder}/score_results.csv", index=False, na_rep='nan')
+
+        # Plot and save the fitness evolution
+        plot_results(results, results_folder)
+
         # Print stats
         print(f"Seed {seed_number} Iteration {iteration}/{NUM_ITERATIONS}: Score: {score.item()}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
-    with torch.no_grad(), autocast():
+    with torch.no_grad():
         best_image = generate_image_from_embeddings(best_text_embeddings, seed)
     best_image_np = best_image.detach().cpu().numpy()
     best_image_np = (best_image_np * 255).astype(np.uint8)
     pil_image = Image.fromarray(best_image_np)
     pil_image.save(f"{results_folder}/best_all.png")
-
-    # Save the metrics
-    results = pd.DataFrame({
-        "iteration": list(range(1, NUM_ITERATIONS + 1)),
-        "score": max_fit_list,
-        "mean_grad": mean_grad_list,
-        "total_grad_norm": total_norm_list
-    })
-
-    results.to_csv(f"{results_folder}/fitness_results.csv", index=False, na_rep='nan')
-
-    # Plot and save the fitness evolution
-    plot_results(results, results_folder)
 
 def plot_results(results, results_folder):
     plt.figure()
@@ -318,7 +315,17 @@ def plot_results(results, results_folder):
     plt.title('Score over Iterations')
     plt.grid()
     plt.legend()
-    plt.savefig(results_folder + "/fitness_evolution.png")
+    plt.savefig(results_folder + "/score_evolution.png")
+    plt.close()
+
+    plt.figure()
+    plt.plot(results['iteration'], results['loss'], label="Loss")
+    plt.xlabel('Iteration')
+    plt.ylabel('Loss')
+    plt.title('Loss over Iterations')
+    plt.grid()
+    plt.legend()
+    plt.savefig(results_folder + "/loss_evolution.png")
     plt.close()
 
 if __name__ == "__main__":
