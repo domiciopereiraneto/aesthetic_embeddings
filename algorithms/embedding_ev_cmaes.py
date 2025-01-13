@@ -67,6 +67,7 @@ OUTPUT_FOLDER = "results/test_6"
 NUM_GENERATIONS, POP_SIZE = 200, 10  # Adjust as needed
 SIGMA = 0.2
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
+FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
@@ -201,7 +202,7 @@ def evaluate(x, seed, initial_embedding):
     mean_embedding = torch.mean(embedding)
     std_embedding = torch.std(embedding)
 
-    fitness = ( (score - MIN_SCORE) / (MAX_SCORE - MIN_SCORE) + (1-abs(mean_embedding)) + (1-abs(std_embedding-1)) ).item()
+    fitness = ( FITNESS_WEIGHTS[0]*(score - MIN_SCORE) / (MAX_SCORE - MIN_SCORE) +  FITNESS_WEIGHTS[1]*(1-abs(mean_embedding)) +  FITNESS_WEIGHTS[2]*(1-abs(std_embedding-1)) ).item()
 
     return -fitness, score  # Negate the score to turn maximization into minimization
 
