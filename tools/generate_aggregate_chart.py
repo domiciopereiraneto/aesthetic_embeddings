@@ -1,6 +1,10 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
+aggregated_file = "results/test_5/aggregated_score_results.xlsx"
+output_file = "results/test_5/aggregated_score_with_stats.xlsx"
+EVOLUTIONARY = True
+
 def plot_mean_std(x_axis, m_vec, std_vec, description, title=None, y_label=None, x_label=None):
     lower_bound = [M_new - Sigma for M_new, Sigma in zip(m_vec, std_vec)]
     upper_bound = [M_new + Sigma for M_new, Sigma in zip(m_vec, std_vec)]
@@ -13,6 +17,18 @@ def plot_mean_std(x_axis, m_vec, std_vec, description, title=None, y_label=None,
         plt.ylabel(y_label)
     if x_label is not None:
         plt.xlabel(x_label)
+
+def save_plot_results_fitness(results, results_folder):
+    plt.figure()
+    plot_mean_std(results['generation'], results['avg_fitness'], results['std_fitness'], "Population")
+    plot_mean_std(results['generation'], results['best_avg_fitness'], results['best_std_fitness'], "Bests")
+    plt.plot(results['generation'], results['max_fitness'], 'r-', label="Best")
+    plt.ylim(0, 10)
+    plt.xlabel('Generation')
+    plt.ylabel('Fitness (Aesthetic Score)')
+    plt.grid()
+    plt.legend()
+    plt.savefig(results_folder + "/fitness_evolution.png")
 
 def save_plot_results_score(results, results_folder):
     plt.figure()
@@ -37,49 +53,47 @@ def save_plot_results_loss(results, results_folder):
     plt.savefig(results_folder + "/loss_evolution.png")
 
 # Load the aggregated data from the Excel file
-aggregated_file = "results/test/aggregated_score_results.xlsx"
 data = pd.read_excel(aggregated_file)
 
-# Calculate the average fitness across all seeds for each iteration
-data['average_score'] = data.filter(like='score_').mean(axis=1)
+if EVOLUTIONARY:
+    # Calculate the average fitness across all seeds for each iteration
+    data['avg_fitness'] = data.filter(like='avg_fitness_').mean(axis=1)
 
-# Calculate the standard deviation of fitness across all seeds for each iteration
-data['std_score'] = data.filter(like='score_').std(axis=1)
+    # Calculate the standard deviation of fitness across all seeds for each iteration
+    data['std_fitness'] = data.filter(like='std_fitness_').std(axis=1)
 
-# Calculate the average fitness across all seeds for each iteration
-data['max_score'] = data.filter(like='score_').max(axis=1)
+    # Calculate the average fitness across all seeds for each iteration
+    data['best_avg_fitness'] = data.filter(like='max_fitness_').mean(axis=1)
 
-# Calculate the average fitness across all seeds for each iteration
-data['average_loss'] = data.filter(like='loss_').mean(axis=1)
+    # Calculate the average fitness across all seeds for each iteration
+    data['best_std_fitness'] = data.filter(like='max_fitness_').std(axis=1)
 
-# Calculate the standard deviation of fitness across all seeds for each iteration
-data['std_loss'] = data.filter(like='loss_').std(axis=1)
+    # Calculate the average fitness across all seeds for each iteration
+    data['max_fitness'] = data.filter(like='max_fitness_').max(axis=1)
 
-# Calculate the average fitness across all seeds for each iteration
-data['min_loss'] = data.filter(like='loss_').min(axis=1)
+    save_plot_results_fitness(data, "results/test_5")
+else:
+    # Calculate the average fitness across all seeds for each iteration
+    data['average_score'] = data.filter(like='score_').mean(axis=1)
 
-save_plot_results_score(data, "results/test")
-save_plot_results_loss(data, "results/test")
+    # Calculate the standard deviation of fitness across all seeds for each iteration
+    data['std_score'] = data.filter(like='score_').std(axis=1)
 
-# Plot the average fitness with error bars (standard deviation)
-# plt.figure(figsize=(10, 6))
-# plt.errorbar(
-#     data['iteration'],
-#     data['average_score'],
-#     yerr=data['std_score'],
-#     fmt='o-',
-#     ecolor='red',
-#     capsize=3,
-#     label='Average Score ± Std. Dev'
-# )
-# plt.title('Average Aesthetic Score (SAM)')
-# plt.xlabel('Iteration')
-# plt.ylabel('Score')
-# plt.grid(True)
-# plt.legend()
-# plt.savefig("results_adam_SAM_opt/aggregated_aesthetic_score_evolution.png")
+    # Calculate the average fitness across all seeds for each iteration
+    data['max_score'] = data.filter(like='score_').max(axis=1)
+
+    # Calculate the average fitness across all seeds for each iteration
+    data['average_loss'] = data.filter(like='loss_').mean(axis=1)
+
+    # Calculate the standard deviation of fitness across all seeds for each iteration
+    data['std_loss'] = data.filter(like='loss_').std(axis=1)
+
+    # Calculate the average fitness across all seeds for each iteration
+    data['min_loss'] = data.filter(like='loss_').min(axis=1)
+
+    save_plot_results_score(data, "results/test")
+    save_plot_results_loss(data, "results/test")
 
 # Save the updated data with average and standard deviation columns to a new file
-output_file = "results/test/aggregated_score_with_stats.xlsx"
 data.to_excel(output_file, index=False)
 print(f"Updated data saved to {output_file}")

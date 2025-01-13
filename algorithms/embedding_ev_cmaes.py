@@ -63,8 +63,11 @@ guidance_scale = 7.5
 height = 512
 width = 512
 
-NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
-SIGMA = 0.1
+OUTPUT_FOLDER = "results/test_6"
+NUM_GENERATIONS, POP_SIZE = 200, 10  # Adjust as needed
+SIGMA = 0.2
+MAX_SCORE, MIN_SCORE = 10.0, 1.0
+FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
@@ -195,7 +198,13 @@ def evaluate(x, seed, initial_embedding):
         image = generate_image_from_embeddings(embedding, seed)
         score = aesthetic_evaluation(image)[0].item()
     # CMA-ES minimizes the function, so we need to invert the score if higher is better
-    return -score  # Negate the score to turn maximization into minimization
+
+    mean_embedding = torch.mean(embedding)
+    std_embedding = torch.std(embedding)
+
+    fitness = ( FITNESS_WEIGHTS[0]*(score - MIN_SCORE) / (MAX_SCORE - MIN_SCORE) +  FITNESS_WEIGHTS[1]*(1-abs(mean_embedding)) +  FITNESS_WEIGHTS[2]*(1-abs(std_embedding-1)) ).item()
+
+    return -fitness, score  # Negate the score to turn maximization into minimization
 
 def normalize_embedding_vector(x):
     x_mean = np.mean(x)
@@ -210,7 +219,7 @@ def main(seed, seed_number):
     np.random.seed(seed)
     random.seed(seed)
 
-    results_folder = f"results/test_4/results_{model_name}_{seed}"
+    results_folder = f"{OUTPUT_FOLDER}/results_{model_name}_{seed}"
     os.makedirs(results_folder, exist_ok=True)
 
     # Initialize the text embeddings with an empty prompt
@@ -245,50 +254,61 @@ def main(seed, seed_number):
         pil_image = Image.fromarray(image_np)
         pil_image.save(f"{results_folder}/it_0.png")
 
-        initial_score = aesthetic_evaluation(initial_image)[0].item()
+        initial_fitness, initial_score = evaluate(initial_embedding, seed, text_embeddings_init)
 
     time_list = [0]
     best_score_overall = initial_score
+    best_fitness_overall = initial_fitness
     best_text_embeddings_overall = text_embeddings_init
 
     start_time = time.time()
     generation = 0
 
-    max_fit_list = [initial_score]
-    avg_fit_list = [initial_score]
+    max_fit_list = [initial_fitness]
+    avg_fit_list = [initial_fitness]
     std_fit_list = [0]
-    best_list = [initial_score]
+
+    max_score_list = [initial_score]
+    avg_score_list = [initial_score]
+    std_score_list = [0]
 
     while not es.stop():
         print(f"Generation {generation+1}/{NUM_GENERATIONS}")
         # Ask for new candidate solutions
         solutions = es.ask()
-        solutions = [normalize_embedding_vector(x) for x in solutions]
+        #solutions = [normalize_embedding_vector(x) for x in solutions]
         # Evaluate candidate solutions
-        fitnesses = []
+        tmp_fitnesses = []
+        scores = []
         for x in solutions:
-            fitness = evaluate(x, seed, text_embeddings_init)
-            fitnesses.append(fitness)
+            fitness, score = evaluate(x, seed, text_embeddings_init)
+            tmp_fitnesses.append(fitness)
+            scores.append(score)
         # Tell CMA-ES the fitnesses
-        es.tell(solutions, fitnesses)
+        es.tell(solutions, tmp_fitnesses)
 
         # Record statistics
-        scores = [-f for f in fitnesses]  # Convert back to positive scores
+        fitnesses = [-f for f in tmp_fitnesses]  # Convert back to positive scores
 
-        # Record statistics
-        scores = [-f for f in fitnesses]  # Convert back to positive scores
-        max_fit = max(scores)
-        avg_fit = np.mean(scores)
-        std_fit = np.std(scores)
+        max_fit = max(fitnesses)
+        avg_fit = np.mean(fitnesses)
+        std_fit = np.std(fitnesses)
 
         max_fit_list.append(max_fit)
         avg_fit_list.append(avg_fit)
         std_fit_list.append(std_fit)
 
+        max_score = max(scores)
+        avg_score = np.mean(scores)
+        std_score = np.std(scores)
+
+        max_score_list.append(max_score)
+        avg_score_list.append(avg_score)
+        std_score_list.append(std_score)
+
         # Get best solution so far
         best_x = es.result.xbest
-        best_score = -es.result.fbest  # Convert back to positive score
-        best_list.append(best_score)
+        best_fitness = -es.result.fbest  # Convert back to positive score
 
         with torch.no_grad():
             # Generate and save the best image
@@ -300,8 +320,8 @@ def main(seed, seed_number):
             pil_image = Image.fromarray(image_np)
             pil_image.save(results_folder + "/best_%d.png" % (generation+1))
 
-        if best_score > best_score_overall:
-            best_score_overall = best_score
+        if best_fitness > best_fitness_overall:
+            best_fitness_overall = best_fitness
             best_text_embeddings_overall = best_text_embeddings
 
         generation += 1
@@ -322,6 +342,9 @@ def main(seed, seed_number):
             "avg_fitness": avg_fit_list,
             "std_fitness": std_fit_list,
             "max_fitness": max_fit_list,
+            "avg_score": avg_score_list,
+            "std_score": std_score_list,
+            "max_score": max_score_list,
             "elapsed_time": time_list
         })
 
@@ -331,7 +354,7 @@ def main(seed, seed_number):
         save_plot_results(results, results_folder)
 
         # Print stats
-        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max fitness: {max_fit}, Avg fitness: {avg_fit}, Estimated time remaining: {formatted_time_remaining}")
+        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max fitness: {max_fit}, Avg fitness: {avg_fit}, Max score: {max_score}, Avg score: {avg_score}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
     with torch.no_grad():
@@ -358,12 +381,22 @@ def save_plot_results(results, results_folder):
     plt.figure()
     plot_mean_std(results['generation'], results['avg_fitness'], results['std_fitness'], "Population")
     plt.plot(results['generation'], results['max_fitness'], 'r-', label="Best")
-    plt.ylim(0, 10)
+    plt.ylim(0, 3.5)
     plt.xlabel('Generation')
-    plt.ylabel('Fitness (Aesthetic Score)')
+    plt.ylabel('Fitness')
     plt.grid()
     plt.legend()
     plt.savefig(results_folder + "/fitness_evolution.png")
+
+    plt.figure()
+    plot_mean_std(results['generation'], results['avg_score'], results['std_score'], "Population")
+    plt.plot(results['generation'], results['max_score'], 'r-', label="Best")
+    plt.ylim(0, 10)
+    plt.xlabel('Generation')
+    plt.ylabel('Aesthetic Score')
+    plt.grid()
+    plt.legend()
+    plt.savefig(results_folder + "/score_evolution.png")
 
 if __name__ == "__main__":
     i = 1

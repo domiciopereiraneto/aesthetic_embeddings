@@ -2,36 +2,54 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "results/test"
-output_file = "results/test/aggregated_score_results.xlsx"
+base_dir = "results/test_5"
+output_file = "results/test_5/aggregated_score_results.xlsx"
+
+EVOLUTIONARY = True
+PREDICTOR = "LAION"
 
 # Initialize aggregated_data as None
 aggregated_data = None
 
 # Iterate over all subdirectories
 for folder_name in os.listdir(base_dir):
-    if folder_name.startswith("results_SAM_"):
+    if folder_name.startswith(f"results_{PREDICTOR}_"):
         seed = folder_name.split("_")[-1]  # Extract the seed number
-        file_path = os.path.join(base_dir, folder_name, "score_results.csv")
+
+        if EVOLUTIONARY:
+            file_path = os.path.join(base_dir, folder_name, "fitness_results.csv")
+        else:
+            file_path = os.path.join(base_dir, folder_name, "score_results.csv")
         
         if os.path.exists(file_path):
             # Read the CSV file
             df = pd.read_csv(file_path)
 
-            df = df.drop(columns=["mean_grad","total_grad_norm","elapsed_time"])
+            if EVOLUTIONARY:
+                df = df.drop(columns=["elapsed_time"])
+            else:
+                df = df.drop(columns=["mean_grad","total_grad_norm","elapsed_time"])
             
             # Ensure the iteration column exists
-            if "iteration" not in df.columns:
+            if not EVOLUTIONARY and "iteration" not in df.columns:
                 raise ValueError(f"Missing 'iteration' column in {file_path}")
             
-            # Rename fitness column to include the seed
-            df = df.rename(columns={"score": f"score_{seed}"})  # Replace "score" with "fitness" if needed
-
-            df = df.rename(columns={"loss": f"loss_{seed}"})  
+            if EVOLUTIONARY and "generation" not in df.columns:
+                raise ValueError(f"Missing 'generation' column in {file_path}")
+            
+            if EVOLUTIONARY:
+                df = df.rename(columns={"avg_fitness": f"avg_fitness_{seed}"})
+                df = df.rename(columns={"max_fitness": f"max_fitness_{seed}"})
+                df = df.rename(columns={"std_fitness": f"std_fitness_{seed}"})
+            else:
+                df = df.rename(columns={"score": f"score_{seed}"}) 
+                df = df.rename(columns={"loss": f"loss_{seed}"})  
             
             # Merge data into the aggregated data
             if aggregated_data is None:
                 aggregated_data = df
+            elif EVOLUTIONARY:
+                aggregated_data = pd.merge(aggregated_data, df, on="generation", how="outer")
             else:
                 aggregated_data = pd.merge(aggregated_data, df, on="iteration", how="outer")
         else:
