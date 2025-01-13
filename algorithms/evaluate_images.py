@@ -36,7 +36,8 @@ def process_images_in_folder(folder_path):
     score_laion_list = []
     score_nima_list = []
     file_name_list = []
-    image_pattern = re.compile(r"it_\d+\.png")  # Regex for file names like it_x.png
+    image_pattern = re.compile(r"\d+\_ind00000_best_overall.png")  # Regex for file names like it_x.png
+    #image_pattern = re.compile(r"it_\d+\.png")  # Regex for file names like it_x.png
     image_files = [f for f in sorted(os.listdir(folder_path)) if image_pattern.match(f)]
     total_images = len(image_files)  # Get total number of images to process
     processed_count = 0  # Initialize processed images count
@@ -78,7 +79,8 @@ def process_images_in_folder(folder_path):
                     data["laion_score"] = score_laion_list
                 if len(score_nima_list) > 0:
                     data["nima_score"] = score_nima_list
-                csv_path = os.path.join(folder_path, "predictions.csv")
+                #csv_path = os.path.join(folder_path, "predictions.csv")
+                csv_path = "domicio_predictions.csv"
                 df = pd.DataFrame(data=data)
                 df.to_csv(csv_path, index=False)
                 #print(f"Saved predictions to {csv_path}")
@@ -89,7 +91,7 @@ def process_images_in_folder(folder_path):
 def process_subfolders(root_folder):
     subfolders = [
         subfolder_name for subfolder_name in os.listdir(root_folder)
-        if os.path.isdir(os.path.join(root_folder, subfolder_name)) and subfolder_name.startswith("results_SAM_")
+        if os.path.isdir(os.path.join(root_folder, subfolder_name)) and subfolder_name.startswith("laion_BM_iqa_seed_21")
     ]
     total_subfolders = len(subfolders)  # Get total number of subfolders
     processed_count = 0  # Initialize processed subfolders count
@@ -105,7 +107,7 @@ def process_subfolders(root_folder):
             print(f"Error processing folder {subfolder_name}: {e}")
 
 # Replace with the root folder containing subfolders
-root_folder = "results/test"
+root_folder = "/data/experiments/tgp-stable/runs/laion_BM_iqa"
 
 # Run the script
 process_subfolders(root_folder)

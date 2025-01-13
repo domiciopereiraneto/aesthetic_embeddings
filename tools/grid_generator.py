@@ -5,9 +5,12 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 
 # Define source directory containing the result folders
-source_dir = 'results/adam_embedding_sam'
+source_dir = 'results/test_4'
 # Output file for the grid
-output_grid_path = 'results/adam_embedding_sam/best_all_grid.png'
+output_grid_path = 'results/test_4/best_all_grid.png'
+
+EVOLUTIONARY = True
+PREDICTOR = "LAION"
 
 # Grid dimensions
 x_rows = 5
@@ -19,19 +22,26 @@ seed_info = []
 # Iterate over folders
 for folder_name in os.listdir(source_dir):
     folder_path = os.path.join(source_dir, folder_name)
-    if os.path.isdir(folder_path) and folder_name.startswith("results_SAM_"):
+    if os.path.isdir(folder_path) and folder_name.startswith(f"results_{PREDICTOR}_"):
         # Extract the seed number from the folder name
         seed_number = folder_name.split("_")[-1]
         
         # Locate the image and CSV file
         image_path = os.path.join(folder_path, "best_all.png")
-        csv_path = os.path.join(folder_path, "score_results.csv")
+
+        if EVOLUTIONARY:
+            csv_path = os.path.join(folder_path, "fitness_results.csv")
+        else:
+            csv_path = os.path.join(folder_path, "score_results.csv")
         
         if os.path.isfile(image_path) and os.path.isfile(csv_path):
             # Read the score from the CSV file
             try:
                 df = pd.read_csv(csv_path)
-                max_score = df["score"].max()
+                if EVOLUTIONARY:
+                    max_score = df["max_fitness"].max()
+                else:
+                    max_score = df["score"].max()
                 seed_info.append((seed_number, max_score, image_path))
             except Exception as e:
                 print(f"Error reading CSV for {folder_name}: {e}")
@@ -57,7 +67,10 @@ for i, ax in enumerate(axes):
         ax.axis("off")
         
         # Annotate with seed and score
-        ax.set_title(f"Seed: {seed}\nScore: {score:.2f}", fontsize=10)
+        if EVOLUTIONARY:
+            ax.set_title(f"Seed: {seed}\nFitness: {score:.2f}", fontsize=10)
+        else:
+            ax.set_title(f"Seed: {seed}\nScore: {score:.2f}", fontsize=10)
     else:
         # Turn off unused subplots
         ax.axis("off")
