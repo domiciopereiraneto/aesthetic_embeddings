@@ -64,7 +64,7 @@ height = 512
 width = 512
 
 OUTPUT_FOLDER = "results/test_6"
-NUM_GENERATIONS, POP_SIZE = 200, 10  # Adjust as needed
+NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
 SIGMA = 0.2
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
 FITNESS_WEIGHTS = [2.0, 1.0, 1.0]

@@ -5,11 +5,11 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 
 # Define source directory containing the result folders
-source_dir = 'results/test_4'
+source_dir = 'results/test_6'
 # Output file for the grid
-output_grid_path = 'results/test_4/best_all_grid.png'
+output_grid_path = 'results/test_6/best_all_grid.png'
 
-EVOLUTIONARY = True
+EVOLUTIONARY, SHOW_FITNESS = True, False
 PREDICTOR = "LAION"
 
 # Grid dimensions
@@ -38,8 +38,10 @@ for folder_name in os.listdir(source_dir):
             # Read the score from the CSV file
             try:
                 df = pd.read_csv(csv_path)
-                if EVOLUTIONARY:
+                if EVOLUTIONARY and SHOW_FITNESS:
                     max_score = df["max_fitness"].max()
+                elif EVOLUTIONARY:
+                    max_score = df["max_score"].max()
                 else:
                     max_score = df["score"].max()
                 seed_info.append((seed_number, max_score, image_path))
@@ -67,7 +69,7 @@ for i, ax in enumerate(axes):
         ax.axis("off")
         
         # Annotate with seed and score
-        if EVOLUTIONARY:
+        if EVOLUTIONARY and SHOW_FITNESS:
             ax.set_title(f"Seed: {seed}\nFitness: {score:.2f}", fontsize=10)
         else:
             ax.set_title(f"Seed: {seed}\nScore: {score:.2f}", fontsize=10)

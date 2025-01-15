@@ -2,8 +2,8 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "results/test_5"
-output_file = "results/test_5/aggregated_score_results.xlsx"
+base_dir = "results/test_6"
+output_file = "results/test_6/aggregated_score_results.xlsx"
 
 EVOLUTIONARY = True
 PREDICTOR = "LAION"
@@ -41,6 +41,9 @@ for folder_name in os.listdir(base_dir):
                 df = df.rename(columns={"avg_fitness": f"avg_fitness_{seed}"})
                 df = df.rename(columns={"max_fitness": f"max_fitness_{seed}"})
                 df = df.rename(columns={"std_fitness": f"std_fitness_{seed}"})
+                df = df.rename(columns={"avg_score": f"avg_score_{seed}"})
+                df = df.rename(columns={"max_score": f"max_score_{seed}"})
+                df = df.rename(columns={"std_score": f"std_score_{seed}"})
             else:
                 df = df.rename(columns={"score": f"score_{seed}"}) 
                 df = df.rename(columns={"loss": f"loss_{seed}"})  
