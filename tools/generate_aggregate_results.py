@@ -2,10 +2,10 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "results/test_6"
-output_file = "results/test_6/aggregated_score_results.xlsx"
+base_dir = "results/adam_embedding_laion"
+output_file = "results/adam_embedding_laion/aggregated_score_results.xlsx"
 
-EVOLUTIONARY = True
+EVOLUTIONARY = False
 PREDICTOR = "LAION"
 
 # Initialize aggregated_data as None
@@ -25,10 +25,8 @@ for folder_name in os.listdir(base_dir):
             # Read the CSV file
             df = pd.read_csv(file_path)
 
-            if EVOLUTIONARY:
-                df = df.drop(columns=["elapsed_time"])
-            else:
-                df = df.drop(columns=["mean_grad","total_grad_norm","elapsed_time"])
+            if not EVOLUTIONARY:
+                df = df.drop(columns=["mean_grad","total_grad_norm"])
             
             # Ensure the iteration column exists
             if not EVOLUTIONARY and "iteration" not in df.columns:
@@ -44,9 +42,11 @@ for folder_name in os.listdir(base_dir):
                 df = df.rename(columns={"avg_score": f"avg_score_{seed}"})
                 df = df.rename(columns={"max_score": f"max_score_{seed}"})
                 df = df.rename(columns={"std_score": f"std_score_{seed}"})
+                df = df.rename(columns={"elapsed_time": f"elapsed_time_{seed}"})
             else:
                 df = df.rename(columns={"score": f"score_{seed}"}) 
                 df = df.rename(columns={"loss": f"loss_{seed}"})  
+                df = df.rename(columns={"elapsed_time": f"elapsed_time_{seed}"})
             
             # Merge data into the aggregated data
             if aggregated_data is None:

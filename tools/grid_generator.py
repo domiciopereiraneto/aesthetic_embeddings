@@ -1,13 +1,12 @@
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from PIL import Image
 
 # Define source directory containing the result folders
-source_dir = 'results/test_6'
+source_dir = 'results/test_hybrid'
 # Output file for the grid
-output_grid_path = 'results/test_6/best_all_grid.png'
+output_grid_path = 'results/test_hybrid/best_all_grid.png'
 
 EVOLUTIONARY, SHOW_FITNESS = True, False
 PREDICTOR = "LAION"
@@ -15,6 +14,7 @@ PREDICTOR = "LAION"
 # Grid dimensions
 x_rows = 5
 y_columns = 6
+max_images = x_rows * y_columns
 
 # Initialize lists for seeds, scores, and image paths
 seed_info = []
@@ -50,8 +50,11 @@ for folder_name in os.listdir(source_dir):
         else:
             print(f"Missing required files in {folder_name}")
 
-# Sort by seed number (optional)
-seed_info.sort(key=lambda x: float(x[1]))
+# Sort by score or fitness in descending order
+seed_info.sort(key=lambda x: float(x[1]), reverse=True)
+
+# Select only the top images that fit into the grid
+seed_info = seed_info[:max_images]
 
 # Create the grid
 fig, axes = plt.subplots(x_rows, y_columns, figsize=(y_columns * 3, x_rows * 3))

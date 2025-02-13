@@ -64,11 +64,11 @@ height = 512
 width = 512
 
 OUTPUT_FOLDER = "results/test_hybrid"
-NUM_GENERATIONS, POP_SIZE = 20, 10  # Adjust as needed
+NUM_GENERATIONS, POP_SIZE = 50, 10  # Adjust as needed
 SIGMA = 0.1
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
 FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
-ADAM_ITERATIONS = 10  # Number of Adam iterations per individual
+ADAM_ITERATIONS = 1  # Number of Adam iterations per individual
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"

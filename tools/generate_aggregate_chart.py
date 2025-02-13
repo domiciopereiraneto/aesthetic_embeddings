@@ -1,11 +1,12 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-aggregated_file = "results/test_6/aggregated_score_results.xlsx"
-output_file = "results/test_6/aggregated_score_with_stats.xlsx"
-results_folder = "results/test_6"
+aggregated_file = "results/test_hybrid/aggregated_score_results.xlsx"
+output_file = "results/test_hybrid/aggregated_score_with_stats.xlsx"
+results_folder = "results/test_hybrid"
 EVOLUTIONARY = True
-MIN_FITNESS, MAX_FITNESS = 0, 4.5
+MIN_FITNESS, MAX_FITNESS = 0, 12
+MIN_SCORE, MAX_SCORE = 0, 12
 
 def plot_mean_std(x_axis, m_vec, std_vec, description, title=None, y_label=None, x_label=None):
     lower_bound = [M_new - Sigma for M_new, Sigma in zip(m_vec, std_vec)]
@@ -36,7 +37,7 @@ def save_plot_results_fitness(results, results_folder):
     plot_mean_std(results['generation'], results['avg_score'], results['std_score'], "Population")
     plot_mean_std(results['generation'], results['best_avg_score'], results['best_std_score'], "Bests")
     plt.plot(results['generation'], results['max_score'], 'r-', label="Best")
-    plt.ylim(0, 10)
+    plt.ylim(MIN_SCORE, MAX_SCORE)
     plt.xlabel('Generation')
     plt.ylabel('Aesthetic Score')
     plt.grid()

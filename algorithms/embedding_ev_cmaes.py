@@ -55,7 +55,7 @@ if args.predictor is not None:
     predictor = args.predictor
 else:
     print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 0  # Set default to SAM
+    predictor = 1  # Set default to SAM
 
 num_inference_steps = 11
 guidance_scale = 7.5
@@ -63,8 +63,8 @@ guidance_scale = 7.5
 height = 512
 width = 512
 
-OUTPUT_FOLDER = "results/test_6"
-NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
+OUTPUT_FOLDER = "results/test_tmp"
+NUM_GENERATIONS, POP_SIZE = 10, 10  # Adjust as needed
 SIGMA = 0.2
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
 FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
@@ -272,6 +272,11 @@ def main(seed, seed_number):
     avg_score_list = [initial_score]
     std_score_list = [0]
 
+    embeddings_per_generation_list = []
+    fitnesses_per_generation_list = []
+
+    best_embeddings_list = [best_text_embeddings_overall]
+
     while not es.stop():
         print(f"Generation {generation+1}/{NUM_GENERATIONS}")
         # Ask for new candidate solutions
@@ -282,6 +287,7 @@ def main(seed, seed_number):
         scores = []
         for x in solutions:
             fitness, score = evaluate(x, seed, text_embeddings_init)
+            fitness = -score # remove for multiobjective optimization
             tmp_fitnesses.append(fitness)
             scores.append(score)
         # Tell CMA-ES the fitnesses
@@ -306,9 +312,26 @@ def main(seed, seed_number):
         avg_score_list.append(avg_score)
         std_score_list.append(std_score)
 
+        embeddings_per_generation_list.append(solutions)
+        fitnesses_per_generation_list.append(fitnesses)
+
+        best_embeddings_list.append(es.result.xbest)
+
         # Get best solution so far
         best_x = es.result.xbest
         best_fitness = -es.result.fbest  # Convert back to positive score
+
+        with torch.no_grad():
+            ind_id = 1
+            for solution in solutions:
+                solution_tmp = torch.tensor(solution, dtype=torch.float32, device=device)
+                solution_tmp = solution_tmp.view(text_embeddings_init.shape)
+                image = generate_image_from_embeddings(solution_tmp, seed)
+                image_np = image.detach().clone().cpu().numpy()
+                image_np = (image_np * 255).astype(np.uint8)
+                pil_image = Image.fromarray(image_np)
+                pil_image.save(results_folder + "gen_%d/id_%d.png" % (generation+1, ind_id))
+                ind_id += 1
 
         with torch.no_grad():
             # Generate and save the best image
@@ -349,6 +372,21 @@ def main(seed, seed_number):
         })
 
         results.to_csv(f"{results_folder}/fitness_results.csv", index=False, na_rep='nan')
+
+        results_generation = pd.DataFrame({
+            "fitnesses": fitnesses_per_generation_list,
+            "embeddings": embeddings_per_generation_list
+        })
+
+        results_generation.to_csv(f"{results_folder}/gen_{generation+1}/fitness_embeddings.csv", index=False, na_rep='nan')
+
+        results_best = pd.DataFrame({
+            "generation": list(range(0, generation + 1)),
+            "max_fitness": max_fit_list,
+            "best_embeddings": best_embeddings_list
+        })
+
+        results_best.to_csv(f"{results_folder}/best_fitness_embeddings.csv", index=False, na_rep='nan')
 
         # Plot and save the fitness evolution
         save_plot_results(results, results_folder)
