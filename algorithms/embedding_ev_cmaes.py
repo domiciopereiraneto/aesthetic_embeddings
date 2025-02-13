@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 
 # Get the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -49,7 +50,7 @@ if args.cuda is not None:
     cuda_n = str(args.cuda)
 else:
     print("CUDA device not provided, default is 0")
-    cuda_n = str(0)
+    cuda_n = str(1)
 
 if args.predictor is not None:
     predictor = args.predictor
@@ -63,8 +64,8 @@ guidance_scale = 7.5
 height = 512
 width = 512
 
-OUTPUT_FOLDER = "results/test_tmp"
-NUM_GENERATIONS, POP_SIZE = 10, 10  # Adjust as needed
+OUTPUT_FOLDER = "results/cmaes_embedding_laion_02sigma"
+NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
 SIGMA = 0.2
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
 FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
@@ -255,6 +256,7 @@ def main(seed, seed_number):
         pil_image.save(f"{results_folder}/it_0.png")
 
         initial_fitness, initial_score = evaluate(initial_embedding, seed, text_embeddings_init)
+        initial_fitness = initial_score
 
     time_list = [0]
     best_score_overall = initial_score
@@ -275,10 +277,13 @@ def main(seed, seed_number):
     embeddings_per_generation_list = []
     fitnesses_per_generation_list = []
 
-    best_embeddings_list = [best_text_embeddings_overall]
+    best_embeddings_list = [initial_embedding]
 
     while not es.stop():
         print(f"Generation {generation+1}/{NUM_GENERATIONS}")
+
+        os.makedirs(results_folder+"/gen_%d" % (generation+1), exist_ok=True)
+
         # Ask for new candidate solutions
         solutions = es.ask()
         #solutions = [normalize_embedding_vector(x) for x in solutions]
@@ -330,7 +335,7 @@ def main(seed, seed_number):
                 image_np = image.detach().clone().cpu().numpy()
                 image_np = (image_np * 255).astype(np.uint8)
                 pil_image = Image.fromarray(image_np)
-                pil_image.save(results_folder + "gen_%d/id_%d.png" % (generation+1, ind_id))
+                pil_image.save(results_folder + "/gen_%d/id_%d.png" % (generation+1, ind_id))
                 ind_id += 1
 
         with torch.no_grad():
@@ -373,17 +378,23 @@ def main(seed, seed_number):
 
         results.to_csv(f"{results_folder}/fitness_results.csv", index=False, na_rep='nan')
 
+        # Convert embeddings to JSON strings
+        embeddings_json = [json.dumps(embedding.tolist()) for embedding in solutions]
+
         results_generation = pd.DataFrame({
-            "fitnesses": fitnesses_per_generation_list,
-            "embeddings": embeddings_per_generation_list
+            "fitnesses": fitnesses,
+            "embeddings": embeddings_json
         })
 
-        results_generation.to_csv(f"{results_folder}/gen_{generation+1}/fitness_embeddings.csv", index=False, na_rep='nan')
+        results_generation.to_csv(f"{results_folder}/gen_{generation}/fitness_embeddings.csv", index=False, na_rep='nan')
 
+
+        # Convert embeddings to JSON strings
+        best_embeddings_json = [json.dumps(embedding.tolist()) for embedding in best_embeddings_list]
         results_best = pd.DataFrame({
             "generation": list(range(0, generation + 1)),
             "max_fitness": max_fit_list,
-            "best_embeddings": best_embeddings_list
+            "best_embeddings": best_embeddings_json
         })
 
         results_best.to_csv(f"{results_folder}/best_fitness_embeddings.csv", index=False, na_rep='nan')
