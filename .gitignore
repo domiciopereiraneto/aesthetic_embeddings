@@ -1,6 +1,7 @@
 results/*
 datasets/*
-__pycache__
+seeds/*
+*__pycache__
 simulacra-aesthetic-models
 test.png
 results_*

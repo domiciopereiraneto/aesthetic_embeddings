@@ -1,9 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-aggregated_file = "results/test_hybrid/aggregated_score_results.xlsx"
-output_file = "results/test_hybrid/aggregated_score_with_stats.xlsx"
-results_folder = "results/test_hybrid"
+aggregated_file = "results/cmaes_embedding_laion_02sigma/aggregated_score_results.xlsx"
+output_file = "results/cmaes_embedding_laion_02sigma/aggregated_score_with_stats.xlsx"
+results_folder = "results/cmaes_embedding_laion_02sigma"
 EVOLUTIONARY = True
 MIN_FITNESS, MAX_FITNESS = 0, 12
 MIN_SCORE, MAX_SCORE = 0, 12

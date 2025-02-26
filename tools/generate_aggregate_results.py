@@ -2,10 +2,10 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "results/adam_embedding_laion"
-output_file = "results/adam_embedding_laion/aggregated_score_results.xlsx"
+base_dir = "results/cmaes_embedding_laion_02sigma"
+output_file = "results/cmaes_embedding_laion_02sigma/aggregated_score_results.xlsx"
 
-EVOLUTIONARY = False
+EVOLUTIONARY = True
 PREDICTOR = "LAION"
 
 # Initialize aggregated_data as None
