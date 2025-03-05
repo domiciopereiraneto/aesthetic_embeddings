@@ -2,8 +2,8 @@ import os
 import pandas as pd
 
 # Directory containing the result folders
-base_dir = "results/cmaes_embedding_laion_02sigma"
-output_file = "results/cmaes_embedding_laion_02sigma/aggregated_score_results.xlsx"
+base_dir = "results/cmaes_embedding_laion_partial_1"
+output_file = "results/cmaes_embedding_laion_partial_1/aggregated_score_results.xlsx"
 
 EVOLUTIONARY = True
 PREDICTOR = "LAION"

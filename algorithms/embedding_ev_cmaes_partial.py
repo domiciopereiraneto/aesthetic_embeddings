@@ -50,7 +50,7 @@ if args.cuda is not None:
     cuda_n = str(args.cuda)
 else:
     print("CUDA device not provided, default is 0")
-    cuda_n = str(0)
+    cuda_n = str(1)
 
 if args.predictor is not None:
     predictor = args.predictor
@@ -64,9 +64,10 @@ guidance_scale = 7.5
 height = 512
 width = 512
 
-OUTPUT_FOLDER = "results/cmaes_embedding_laion_005sigma"
+OUTPUT_FOLDER = "results/cmaes_embedding_laion_partial_30"
 NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
-SIGMA = 0.05
+SIGMA = 0.1
+N_TOKENS = 30
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
 FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
 
@@ -189,13 +190,14 @@ def format_time(seconds):
     else:
         return f"{seconds}s"
 
-def evaluate(x, seed, initial_embedding):
+def evaluate(input_embedding, seed, initial_embedding_shape, padding_embedding):
     # x is a NumPy array representing the embedding vector
     # Convert it to a torch tensor
+    input_embedding_padded = np.concatenate([input_embedding, padding_embedding])
     with torch.no_grad():
-        embedding = torch.tensor(x, dtype=torch.float32, device=device)
+        embedding = torch.tensor(input_embedding_padded, dtype=torch.float32, device=device)
         # Reshape the embedding to the original shape
-        embedding = embedding.view(initial_embedding.shape)
+        embedding = embedding.view(initial_embedding_shape)
         image = generate_image_from_embeddings(embedding, seed)
         score = aesthetic_evaluation(image)[0].item()
     # CMA-ES minimizes the function, so we need to invert the score if higher is better
@@ -228,12 +230,17 @@ def main(seed, seed_number):
         "",
         return_tensors="pt",
         padding="max_length",
-        max_length=77,
+        max_length=N_TOKENS,
         truncation=True
     ).to(device)
     text_embeddings_init = pipe.text_encoder(text_input.input_ids.to(device))[0]
     embedding_size = text_embeddings_init.numel()
     initial_embedding = text_embeddings_init.detach().cpu().numpy().flatten()    
+
+    padding_tokens = np.array([pipe.tokenizer.eos_token_id] * (77-N_TOKENS))
+    padding_tokens = torch.tensor(padding_tokens, dtype=torch.int64).view(1, len(padding_tokens)).to(device)
+    text_embeddings_padding = pipe.text_encoder(padding_tokens)[0]
+    padding_embedding = text_embeddings_padding.detach().cpu().numpy().flatten()    
 
     # Set CMA-ES options
     es_options = {
@@ -248,14 +255,16 @@ def main(seed, seed_number):
     # Initialize CMA-ES
     es = cma.CMAEvolutionStrategy(initial_embedding, SIGMA, es_options)
 
+    text_embeddings_init_complete = torch.cat([text_embeddings_init, text_embeddings_padding], dim=1)
+    text_embeddings_init_complete_shape = text_embeddings_init_complete.shape
     with torch.no_grad():
-        initial_image = generate_image_from_embeddings(text_embeddings_init, seed)
+        initial_image = generate_image_from_embeddings(text_embeddings_init_complete, seed)
         image_np = initial_image.detach().clone().cpu().numpy()
         image_np = (image_np * 255).astype(np.uint8)
         pil_image = Image.fromarray(image_np)
         pil_image.save(f"{results_folder}/it_0.png")
 
-        initial_fitness, initial_score = evaluate(initial_embedding, seed, text_embeddings_init)
+        initial_fitness, initial_score = evaluate(initial_embedding, seed, text_embeddings_init_complete_shape, padding_embedding)
         initial_fitness = initial_score
 
     time_list = [0]
@@ -291,7 +300,7 @@ def main(seed, seed_number):
         tmp_fitnesses = []
         scores = []
         for x in solutions:
-            fitness, score = evaluate(x, seed, text_embeddings_init)
+            fitness, score = evaluate(x, seed, text_embeddings_init_complete_shape, padding_embedding)
             fitness = -score # remove for multiobjective optimization
             tmp_fitnesses.append(fitness)
             scores.append(score)
@@ -331,7 +340,8 @@ def main(seed, seed_number):
             for solution in solutions:
                 solution_tmp = torch.tensor(solution, dtype=torch.float32, device=device)
                 solution_tmp = solution_tmp.view(text_embeddings_init.shape)
-                image = generate_image_from_embeddings(solution_tmp, seed)
+                solution_padded = torch.cat([solution_tmp, text_embeddings_padding], dim=1)
+                image = generate_image_from_embeddings(solution_padded, seed)
                 image_np = image.detach().clone().cpu().numpy()
                 image_np = (image_np * 255).astype(np.uint8)
                 pil_image = Image.fromarray(image_np)
@@ -342,7 +352,8 @@ def main(seed, seed_number):
             # Generate and save the best image
             best_text_embeddings = torch.tensor(best_x, dtype=torch.float32, device=device)
             best_text_embeddings = best_text_embeddings.view(text_embeddings_init.shape)
-            best_image = generate_image_from_embeddings(best_text_embeddings, seed)
+            best_text_embeddings_padded = torch.cat([best_text_embeddings, text_embeddings_padding], dim=1)
+            best_image = generate_image_from_embeddings(best_text_embeddings_padded, seed)
             image_np = best_image.detach().clone().cpu().numpy()
             image_np = (image_np * 255).astype(np.uint8)
             pil_image = Image.fromarray(image_np)
@@ -407,7 +418,8 @@ def main(seed, seed_number):
 
     # Save the overall best image
     with torch.no_grad():
-        best_image = generate_image_from_embeddings(best_text_embeddings_overall, seed)
+        best_text_embeddings_overall_padded = torch.cat([best_text_embeddings_overall, text_embeddings_padding], dim=1)
+        best_image = generate_image_from_embeddings(best_text_embeddings_overall_padded, seed)
     best_image_np = best_image.detach().cpu().numpy()
     best_image_np = (best_image_np * 255).astype(np.uint8)
     pil_image = Image.fromarray(best_image_np)

@@ -4,11 +4,11 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 # Define source directory containing the result folders
-source_dir = 'results/test_hybrid'
+source_dir = 'results/cmaes_embedding_laion_partial_1'
 # Output file for the grid
-output_grid_path = 'results/test_hybrid/best_all_grid.png'
+output_grid_path = 'results/cmaes_embedding_laion_partial_1/best_all_grid.png'
 
-EVOLUTIONARY, SHOW_FITNESS = True, False
+EVOLUTIONARY, SHOW_FITNESS = True, True
 PREDICTOR = "LAION"
 
 # Grid dimensions
@@ -27,7 +27,7 @@ for folder_name in os.listdir(source_dir):
         seed_number = folder_name.split("_")[-1]
         
         # Locate the image and CSV file
-        image_path = os.path.join(folder_path, "best_all.png")
+        image_path = os.path.join(folder_path, "best_100.png")
 
         if EVOLUTIONARY:
             csv_path = os.path.join(folder_path, "fitness_results.csv")
@@ -51,7 +51,7 @@ for folder_name in os.listdir(source_dir):
             print(f"Missing required files in {folder_name}")
 
 # Sort by score or fitness in descending order
-seed_info.sort(key=lambda x: float(x[1]), reverse=True)
+seed_info.sort(key=lambda x: float(x[1]), reverse=False)
 
 # Select only the top images that fit into the grid
 seed_info = seed_info[:max_images]

@@ -66,10 +66,10 @@ height = 512
 width = 512
 
 OUTPUT_FOLDER = "results/ga_embedding_laion"
-NUM_GENERATIONS, POP_SIZE = 10, 10  # Adjust as needed
+NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
 CXPB, MUTPB, INDPB = 0.8, 0.2, 0.1  # Crossover and mutation probabilities
 TOURNMENT_SIZE = 3
-MUTATION_MU, MUTATION_SIGMA = 0, 0.1
+MUTATION_MU, MUTATION_SIGMA = 0, 0.2
 MAX_SCORE, MIN_SCORE = 10.0, 1.0
 FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
 
