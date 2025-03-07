@@ -5,19 +5,20 @@ from PIL import Image
 
 # Define source directories containing the result folders
 source_dirs = [
-    'results/adam_embedding_laion',
-    'results/test_4',
-    'results/test_hybrid'
+    'results/cmaes_embedding_laion_partial_10',
+    'results/cmaes_embedding_laion_partial_20',
+    'results/cmaes_embedding_laion_partial_30',
+    'results/cmaes_embedding_laion_partial_40'
 ]
 # Output file for the grid
-output_grid_path = 'results/test_hybrid/best_all_grid_compare.png'
+output_grid_path = 'results/cmaes_embedding_laion_partial_10/best_all_grid_compare.png'
 
 EVOLUTIONARY, SHOW_FITNESS = True, False
 PREDICTOR = "LAION"
 
 # Grid dimensions
 x_rows = 30
-y_columns = 4  # 1 column for it_0.png and 3 columns for best_all.png from each source directory
+y_columns = 5  # 1 column for it_0.png and 3 columns for best_all.png from each source directory
 max_images = x_rows * y_columns
 
 # Initialize list for image paths
@@ -60,11 +61,13 @@ for i, ax in enumerate(axes):
         if row == 0 and col == 0:
             ax.set_title("Initial Embedding", fontsize=20)
         elif row == 0 and col == 1:
-            ax.set_title(f"Adam", fontsize=20)
+            ax.set_title(f"10 tokens", fontsize=20)
         elif row == 0 and col == 2:
-            ax.set_title(f"CMA-ES", fontsize=20)
+            ax.set_title(f"20 tokens", fontsize=20)
         elif row == 0 and col == 3:
-            ax.set_title(f"Hybrid", fontsize=20)
+            ax.set_title(f"30 tokens", fontsize=20)
+        elif row == 0 and col == 4:
+            ax.set_title(f"40 tokens", fontsize=20)
     else:
         # Turn off unused subplots
         ax.axis("off")

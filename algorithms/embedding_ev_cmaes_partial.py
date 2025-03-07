@@ -1,10 +1,11 @@
 import sys
 import os
 import json
+import yaml
 
 # Get the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# Add the parent directory to sys.path to obtain access to the submolues
+# Add the parent directory to sys.path to obtain access to the submodules
 sys.path.insert(0, parent_dir)
 
 import torch
@@ -14,7 +15,6 @@ import pandas as pd
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 import random
 from PIL import Image
-import argparse
 import matplotlib.pyplot as plt
 import time
 
@@ -25,59 +25,34 @@ import laion_rank_image
 
 import cma
 
-parser = argparse.ArgumentParser(description='Receives argument seed (int).')
+config_path = "algorithms/config_cmaes_partial.yaml"
 
-parser.add_argument('--seed', type=int, help='Seed')
-parser.add_argument('--seed_path', type=str, help='Path to seed list file')
-parser.add_argument('--cuda', type=int, help='CUDA GPU to use')
-parser.add_argument('--predictor', type=int, help='Aesthetic predictor to use\n0 - SAM\n1 - LAION\n2 - NIMA')
+# Load configuration from YAML file
+with open(config_path, 'r') as file:
+    config = yaml.safe_load(file)
 
-args = parser.parse_args()
-
-if args.seed_path is not None:
-    SEED_PATH = args.seed_path
-elif args.seed is not None:
-    print("Seed path not provided, executing single run")
-    SEED = args.seed
-    SEED_PATH = None
-else:
-    print("Seed path not provided, executing single run")
-    print("Seed not provided, default is 42")
-    SEED = 42
-    SEED_PATH = None
-
-if args.cuda is not None:
-    cuda_n = str(args.cuda)
-else:
-    print("CUDA device not provided, default is 0")
-    cuda_n = str(1)
-
-if args.predictor is not None:
-    predictor = args.predictor
-else:
-    print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 1  # Set default to SAM
-
-num_inference_steps = 11
-guidance_scale = 7.5
-# Height and width of the images
-height = 512
-width = 512
-
-OUTPUT_FOLDER = "results/cmaes_embedding_laion_partial_30"
-NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
-SIGMA = 0.1
-N_TOKENS = 30
-MAX_SCORE, MIN_SCORE = 10.0, 1.0
-FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
+SEED = config['seed']
+SEED_PATH = config['seed_path']
+cuda_n = str(config['cuda'])
+predictor = config['predictor']
+num_inference_steps = config['num_inference_steps']
+guidance_scale = config['guidance_scale']
+height = config['height']
+width = config['width']
+OUTPUT_FOLDER = config['output_folder']
+NUM_GENERATIONS = config['num_generations']
+POP_SIZE = config['pop_size']
+SIGMA = config['sigma']
+N_TOKENS = config['n_tokens']
+MAX_SCORE = config['max_score']
+MIN_SCORE = config['min_score']
+FITNESS_WEIGHTS = config['fitness_weights']
+model_id = config['model_id']
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
-#model_id = "CompVis/stable-diffusion-v1-4"
-model_id = "sd-legacy/stable-diffusion-v1-5"
-#model_id = "stabilityai/stable-diffusion-2-1"
 pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)

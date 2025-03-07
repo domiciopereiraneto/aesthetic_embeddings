@@ -6,7 +6,7 @@ seeds = [
     1984, 2023, 3000, 4096, 5012, 6789, 7001, 8096, 9009, 10007,
     11011, 12121, 13013, 14141, 15015, 16061, 17171, 18181, 19191, 20021
 ]
-num_files = 2  # Adjust this number to change the number of output files
+num_files = 1  # Adjust this number to change the number of output files
 
 # Calculate the number of seeds per file
 seeds_per_file = len(seeds) // num_files
