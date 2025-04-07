@@ -1,11 +1,6 @@
 import sys
 import os
-
-# Get the parent directory
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# Add the parent directory to sys.path to obtain access to the submolues
-sys.path.insert(0, parent_dir)
-
+import yaml
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -17,62 +12,43 @@ import argparse
 import matplotlib.pyplot as plt
 import time
 
+# Get the parent directory
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Add the parent directory to sys.path to obtain access to the submodules
+sys.path.insert(0, parent_dir)
+
 # Aesthetic Evaluators
-import nima_rank_image
-import simulacra_rank_image
-import laion_rank_image
+import src.nima_rank_image as nima_rank_image
+import src.simulacra_rank_image as simulacra_rank_image
+import src.laion_rank_image as laion_rank_image
 
 # Half Precision
 from torch.cuda.amp import autocast, GradScaler
 
-parser = argparse.ArgumentParser(description='Receives argument seed (int).')
+# Load configuration from YAML file
+config_path = "algorithms/config/config_adam.yaml"
+with open(config_path, 'r') as file:
+    config = yaml.safe_load(file)
 
-parser.add_argument('--seed', type=int, help='Seed')
-parser.add_argument('--seed_path', type=str, help='Path to seed list file')
-parser.add_argument('--cuda', type=int, help='CUDA GPU to use')
-parser.add_argument('--predictor', type=int, help='Aesthetic predictor to use\n0 - SAM\n1 - LAION\n2 - NIMA')
-
-args = parser.parse_args()
-
-if args.seed_path is not None:
-    SEED_PATH = args.seed_path
-elif args.seed is not None:
-    print("Seed path not provided, executing single run")
-    SEED = args.seed
-    SEED_PATH = None
-else:
-    print("Seed path not provided, executing single run")
-    print("Seed not provided, default is 42")
-    SEED = 42
-    SEED_PATH = None
-
-if args.cuda is not None:
-    cuda_n = str(args.cuda)
-else:
-    print("CUDA device not provided, default is 0")
-    cuda_n = str(0)
-
-if args.predictor is not None:
-    predictor = args.predictor
-else:
-    print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 1  # Set default to SAM
-
-num_inference_steps = 11
-guidance_scale = 7.5
-# Height and width of the images
-height = 512
-width = 512
-
-NUM_ITERATIONS = 1000  
+SEED = config['seed']
+SEED_PATH = config['seed_path']
+cuda_n = str(config['cuda'])
+predictor = config['predictor']
+num_inference_steps = config['num_inference_steps']
+guidance_scale = config['guidance_scale']
+height = config['height']
+width = config['width']
+NUM_ITERATIONS = config['num_iterations']
+model_id = config['model_id']
+results_folder = config['results_folder']
+learning_rate = float(config['learning_rate'])
+weight_decay = float(config['weight_decay'])
+epsilon = float(config['epsilon'])
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
-#model_id = "CompVis/stable-diffusion-v1-4"
-model_id = "sd-legacy/stable-diffusion-v1-5"
-#model_id = "stabilityai/stable-diffusion-2-1"
 pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)
@@ -193,8 +169,8 @@ def main(seed, seed_number):
     np.random.seed(seed)
     random.seed(seed)
 
-    results_folder = f"results/test/results_{model_name}_{seed}"
-    os.makedirs(results_folder, exist_ok=True)
+    results_folder_seed = f"{results_folder}/results_{model_name}_{seed}"
+    os.makedirs(results_folder_seed, exist_ok=True)
 
     # Initialize the text embeddings with an empty prompt
     text_input = pipe.tokenizer(
@@ -212,7 +188,7 @@ def main(seed, seed_number):
         image_np = initial_image.detach().clone().cpu().numpy()
         image_np = (image_np * 255).astype(np.uint8)
         pil_image = Image.fromarray(image_np)
-        pil_image.save(f"{results_folder}/it_0.png")
+        pil_image.save(f"{results_folder_seed}/it_0.png")
 
         initial_score = aesthetic_evaluation(initial_image)
         initial_loss = 1/(1+initial_score)  # Negative because we want to maximize the score
@@ -226,7 +202,7 @@ def main(seed, seed_number):
     mean_grad_list = [0]
     total_norm_list = [0]
 
-    optimizer = torch.optim.Adam([text_embeddings], lr=1e-3, weight_decay=1e-5, eps=1e-4)  # Adjust learning rate as needed
+    optimizer = torch.optim.Adam([text_embeddings], lr=learning_rate, weight_decay=weight_decay, eps=epsilon)
 
     scaler = GradScaler()  # Initialize GradScaler for mixed precision training
 
@@ -241,9 +217,6 @@ def main(seed, seed_number):
             image = generate_image_from_embeddings(text_embeddings, seed)
             score = aesthetic_evaluation(image)
             loss = 1/(1+score)  # Negative because we want to maximize the score
-
-        #loss.backward()
-        #optimizer.step()
 
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -269,7 +242,7 @@ def main(seed, seed_number):
         image_np = image.detach().clone().cpu().numpy()
         image_np = (image_np * 255).astype(np.uint8)
         pil_image = Image.fromarray(image_np)
-        pil_image.save(f"{results_folder}/it_{iteration}.png")
+        pil_image.save(f"{results_folder_seed}/it_{iteration}.png")
 
         elapsed_time = time.time() - start_time
         iterations_done = iteration
@@ -291,10 +264,10 @@ def main(seed, seed_number):
             "elapsed_time": time_list
         })
 
-        results.to_csv(f"{results_folder}/score_results.csv", index=False, na_rep='nan')
+        results.to_csv(f"{results_folder_seed}/score_results.csv", index=False, na_rep='nan')
 
         # Plot and save the fitness evolution
-        plot_results(results, results_folder)
+        plot_results(results, results_folder_seed)
 
         # Print stats
         print(f"Seed {seed_number} Iteration {iteration}/{NUM_ITERATIONS}: Score: {score.item()}, Estimated time remaining: {formatted_time_remaining}")
@@ -305,9 +278,9 @@ def main(seed, seed_number):
     best_image_np = best_image.detach().cpu().numpy()
     best_image_np = (best_image_np * 255).astype(np.uint8)
     pil_image = Image.fromarray(best_image_np)
-    pil_image.save(f"{results_folder}/best_all.png")
+    pil_image.save(f"{results_folder_seed}/best_all.png")
 
-def plot_results(results, results_folder):
+def plot_results(results, results_folder_seed):
     plt.figure()
     plt.plot(results['iteration'], results['score'], label="Score")
     plt.xlabel('Iteration')
@@ -315,7 +288,7 @@ def plot_results(results, results_folder):
     plt.title('Score over Iterations')
     plt.grid()
     plt.legend()
-    plt.savefig(results_folder + "/score_evolution.png")
+    plt.savefig(results_folder_seed + "/score_evolution.png")
     plt.close()
 
     plt.figure()
@@ -325,7 +298,7 @@ def plot_results(results, results_folder):
     plt.title('Loss over Iterations')
     plt.grid()
     plt.legend()
-    plt.savefig(results_folder + "/loss_evolution.png")
+    plt.savefig(results_folder_seed + "/loss_evolution.png")
     plt.close()
 
 if __name__ == "__main__":

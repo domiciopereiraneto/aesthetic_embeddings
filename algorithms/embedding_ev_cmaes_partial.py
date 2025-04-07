@@ -2,12 +2,6 @@ import sys
 import os
 import json
 import yaml
-
-# Get the parent directory
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# Add the parent directory to sys.path to obtain access to the submodules
-sys.path.insert(0, parent_dir)
-
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -18,14 +12,19 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import time
 
+# Get the parent directory
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Add the parent directory to sys.path to obtain access to the submodules
+sys.path.insert(0, parent_dir)
+
 # Aesthetic Evaluators
-import nima_rank_image
-import simulacra_rank_image
-import laion_rank_image
+import src.nima_rank_image as nima_rank_image
+import src.simulacra_rank_image as simulacra_rank_image
+import src.laion_rank_image as laion_rank_image
 
 import cma
 
-config_path = "algorithms/config_cmaes_partial.yaml"
+config_path = "algorithms/config/config_cmaes_partial.yaml"
 
 # Load configuration from YAML file
 with open(config_path, 'r') as file:
@@ -46,7 +45,6 @@ SIGMA = config['sigma']
 N_TOKENS = config['n_tokens']
 MAX_SCORE = config['max_score']
 MIN_SCORE = config['min_score']
-FITNESS_WEIGHTS = config['fitness_weights']
 model_id = config['model_id']
 
 # Check if a GPU is available and if not, use the CPU
@@ -177,12 +175,7 @@ def evaluate(input_embedding, seed, initial_embedding_shape, padding_embedding):
         score = aesthetic_evaluation(image)[0].item()
     # CMA-ES minimizes the function, so we need to invert the score if higher is better
 
-    mean_embedding = torch.mean(embedding)
-    std_embedding = torch.std(embedding)
-
-    fitness = ( FITNESS_WEIGHTS[0]*(score - MIN_SCORE) / (MAX_SCORE - MIN_SCORE) +  FITNESS_WEIGHTS[1]*(1-abs(mean_embedding)) +  FITNESS_WEIGHTS[2]*(1-abs(std_embedding-1)) ).item()
-
-    return -fitness, score  # Negate the score to turn maximization into minimization
+    return score
 
 def normalize_embedding_vector(x):
     x_mean = np.mean(x)
@@ -239,20 +232,14 @@ def main(seed, seed_number):
         pil_image = Image.fromarray(image_np)
         pil_image.save(f"{results_folder}/it_0.png")
 
-        initial_fitness, initial_score = evaluate(initial_embedding, seed, text_embeddings_init_complete_shape, padding_embedding)
-        initial_fitness = initial_score
+        initial_score = evaluate(initial_embedding, seed, text_embeddings_init_complete_shape, padding_embedding)
 
     time_list = [0]
-    best_score_overall = initial_score
-    best_fitness_overall = initial_fitness
     best_text_embeddings_overall = text_embeddings_init
+    best_fitness_overall = initial_score
 
     start_time = time.time()
     generation = 0
-
-    max_fit_list = [initial_fitness]
-    avg_fit_list = [initial_fitness]
-    std_fit_list = [0]
 
     max_score_list = [initial_score]
     avg_score_list = [initial_score]
@@ -275,7 +262,7 @@ def main(seed, seed_number):
         tmp_fitnesses = []
         scores = []
         for x in solutions:
-            fitness, score = evaluate(x, seed, text_embeddings_init_complete_shape, padding_embedding)
+            score = evaluate(x, seed, text_embeddings_init_complete_shape, padding_embedding)
             fitness = -score # remove for multiobjective optimization
             tmp_fitnesses.append(fitness)
             scores.append(score)
@@ -285,14 +272,6 @@ def main(seed, seed_number):
         # Record statistics
         fitnesses = [-f for f in tmp_fitnesses]  # Convert back to positive scores
 
-        max_fit = max(fitnesses)
-        avg_fit = np.mean(fitnesses)
-        std_fit = np.std(fitnesses)
-
-        max_fit_list.append(max_fit)
-        avg_fit_list.append(avg_fit)
-        std_fit_list.append(std_fit)
-
         max_score = max(scores)
         avg_score = np.mean(scores)
         std_score = np.std(scores)
@@ -300,9 +279,6 @@ def main(seed, seed_number):
         max_score_list.append(max_score)
         avg_score_list.append(avg_score)
         std_score_list.append(std_score)
-
-        #embeddings_per_generation_list.append(solutions)
-        #fitnesses_per_generation_list.append(fitnesses)
 
         best_embeddings_list.append(es.result.xbest)
 
@@ -353,9 +329,6 @@ def main(seed, seed_number):
         # Save the metrics
         results = pd.DataFrame({
             "generation": list(range(0, generation + 1)),
-            "avg_fitness": avg_fit_list,
-            "std_fitness": std_fit_list,
-            "max_fitness": max_fit_list,
             "avg_score": avg_score_list,
             "std_score": std_score_list,
             "max_score": max_score_list,
@@ -379,7 +352,7 @@ def main(seed, seed_number):
         best_embeddings_json = [json.dumps(embedding.tolist()) for embedding in best_embeddings_list]
         results_best = pd.DataFrame({
             "generation": list(range(0, generation + 1)),
-            "max_fitness": max_fit_list,
+            "max_score": max_score_list,
             "best_embeddings": best_embeddings_json
         })
 
@@ -389,7 +362,7 @@ def main(seed, seed_number):
         save_plot_results(results, results_folder)
 
         # Print stats
-        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max fitness: {max_fit}, Avg fitness: {avg_fit}, Max score: {max_score}, Avg score: {avg_score}, Estimated time remaining: {formatted_time_remaining}")
+        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max score: {max_score}, Avg score: {avg_score}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
     with torch.no_grad():
@@ -414,16 +387,6 @@ def plot_mean_std(x_axis, m_vec, std_vec, description, title=None, y_label=None,
         plt.xlabel(x_label)
 
 def save_plot_results(results, results_folder):
-    plt.figure()
-    plot_mean_std(results['generation'], results['avg_fitness'], results['std_fitness'], "Population")
-    plt.plot(results['generation'], results['max_fitness'], 'r-', label="Best")
-    plt.ylim(0, 3.5)
-    plt.xlabel('Generation')
-    plt.ylabel('Fitness')
-    plt.grid()
-    plt.legend()
-    plt.savefig(results_folder + "/fitness_evolution.png")
-
     plt.figure()
     plot_mean_std(results['generation'], results['avg_score'], results['std_score'], "Population")
     plt.plot(results['generation'], results['max_score'], 'r-', label="Best")

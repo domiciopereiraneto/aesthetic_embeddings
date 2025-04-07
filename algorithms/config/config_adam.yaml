@@ -1,0 +1,15 @@
+seed: 42
+#seed_path: "seeds/seeds_1.txt"
+seed_path: null
+cuda: 0
+predictor: 1
+num_inference_steps: 11
+guidance_scale: 7.5
+height: 512
+width: 512
+num_iterations: 10
+model_id: "sd-legacy/stable-diffusion-v1-5"
+results_folder: "results/adam"
+learning_rate: 1e-3
+weight_decay: 1e-5
+epsilon: 1e-4

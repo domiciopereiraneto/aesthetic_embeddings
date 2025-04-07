@@ -1,12 +1,7 @@
 import sys
 import os
 import json
-
-# Get the parent directory
-parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-# Add the parent directory to sys.path to obtain access to the submolues
-sys.path.insert(0, parent_dir)
-
+import yaml
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -14,69 +9,47 @@ import pandas as pd
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 import random
 from PIL import Image
-import argparse
 import matplotlib.pyplot as plt
 import time
 
+# Get the parent directory
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# Add the parent directory to sys.path to obtain access to the submodules
+sys.path.insert(0, parent_dir)
+
 # Aesthetic Evaluators
-import nima_rank_image
-import simulacra_rank_image
-import laion_rank_image
+import src.nima_rank_image as nima_rank_image
+import src.simulacra_rank_image as simulacra_rank_image
+import src.laion_rank_image as laion_rank_image
 
 import cma
 
-parser = argparse.ArgumentParser(description='Receives argument seed (int).')
+# Load configuration from YAML file
+config_path = "algorithms/config/config_cmaes.yaml"
+with open(config_path, 'r') as file:
+    config = yaml.safe_load(file)
 
-parser.add_argument('--seed', type=int, help='Seed')
-parser.add_argument('--seed_path', type=str, help='Path to seed list file')
-parser.add_argument('--cuda', type=int, help='CUDA GPU to use')
-parser.add_argument('--predictor', type=int, help='Aesthetic predictor to use\n0 - SAM\n1 - LAION\n2 - NIMA')
-
-args = parser.parse_args()
-
-if args.seed_path is not None:
-    SEED_PATH = args.seed_path
-elif args.seed is not None:
-    print("Seed path not provided, executing single run")
-    SEED = args.seed
-    SEED_PATH = None
-else:
-    print("Seed path not provided, executing single run")
-    print("Seed not provided, default is 42")
-    SEED = 42
-    SEED_PATH = None
-
-if args.cuda is not None:
-    cuda_n = str(args.cuda)
-else:
-    print("CUDA device not provided, default is 0")
-    cuda_n = str(0)
-
-if args.predictor is not None:
-    predictor = args.predictor
-else:
-    print("Aesthetic predictor not provided, default is 0 (SAM)")
-    predictor = 1  # Set default to SAM
-
-num_inference_steps = 11
-guidance_scale = 7.5
-# Height and width of the images
-height = 512
-width = 512
-
-OUTPUT_FOLDER = "results/cmaes_embedding_laion_005sigma"
-NUM_GENERATIONS, POP_SIZE = 100, 10  # Adjust as needed
-SIGMA = 0.05
-MAX_SCORE, MIN_SCORE = 10.0, 1.0
-FITNESS_WEIGHTS = [2.0, 1.0, 1.0]
+# Load parameters from the YAML file
+SEED = config['seed']
+SEED_PATH = config['seed_path']
+cuda_n = str(config['cuda'])
+predictor = config['predictor']
+num_inference_steps = config['num_inference_steps']
+guidance_scale = config['guidance_scale']
+height = config['height']
+width = config['width']
+OUTPUT_FOLDER = config['output_folder']
+NUM_GENERATIONS = config['num_generations']
+POP_SIZE = config['pop_size']
+SIGMA = config['sigma']
+MAX_SCORE = config['max_score']
+MIN_SCORE = config['min_score']
+model_id = config['model_id']
 
 # Check if a GPU is available and if not, use the CPU
 device = "cuda:" + cuda_n if torch.cuda.is_available() else "cpu"
 
 # Load the Stable Diffusion pipeline
-#model_id = "CompVis/stable-diffusion-v1-4"
-model_id = "sd-legacy/stable-diffusion-v1-5"
-#model_id = "stabilityai/stable-diffusion-2-1"
 pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32).to(device)
 pipe.scheduler = DDIMScheduler.from_pretrained(model_id, subfolder="scheduler")
 pipe.to(device)
@@ -200,12 +173,7 @@ def evaluate(x, seed, initial_embedding):
         score = aesthetic_evaluation(image)[0].item()
     # CMA-ES minimizes the function, so we need to invert the score if higher is better
 
-    mean_embedding = torch.mean(embedding)
-    std_embedding = torch.std(embedding)
-
-    fitness = ( FITNESS_WEIGHTS[0]*(score - MIN_SCORE) / (MAX_SCORE - MIN_SCORE) +  FITNESS_WEIGHTS[1]*(1-abs(mean_embedding)) +  FITNESS_WEIGHTS[2]*(1-abs(std_embedding-1)) ).item()
-
-    return -fitness, score  # Negate the score to turn maximization into minimization
+    return score  
 
 def normalize_embedding_vector(x):
     x_mean = np.mean(x)
@@ -255,27 +223,18 @@ def main(seed, seed_number):
         pil_image = Image.fromarray(image_np)
         pil_image.save(f"{results_folder}/it_0.png")
 
-        initial_fitness, initial_score = evaluate(initial_embedding, seed, text_embeddings_init)
-        initial_fitness = initial_score
+        initial_score = evaluate(initial_embedding, seed, text_embeddings_init)
 
     time_list = [0]
-    best_score_overall = initial_score
-    best_fitness_overall = initial_fitness
+    best_fitness_overall = initial_score
     best_text_embeddings_overall = text_embeddings_init
 
     start_time = time.time()
     generation = 0
 
-    max_fit_list = [initial_fitness]
-    avg_fit_list = [initial_fitness]
-    std_fit_list = [0]
-
     max_score_list = [initial_score]
     avg_score_list = [initial_score]
     std_score_list = [0]
-
-    #embeddings_per_generation_list = []
-    #fitnesses_per_generation_list = []
 
     best_embeddings_list = [initial_embedding]
 
@@ -291,7 +250,7 @@ def main(seed, seed_number):
         tmp_fitnesses = []
         scores = []
         for x in solutions:
-            fitness, score = evaluate(x, seed, text_embeddings_init)
+            score = evaluate(x, seed, text_embeddings_init)
             fitness = -score # remove for multiobjective optimization
             tmp_fitnesses.append(fitness)
             scores.append(score)
@@ -301,14 +260,6 @@ def main(seed, seed_number):
         # Record statistics
         fitnesses = [-f for f in tmp_fitnesses]  # Convert back to positive scores
 
-        max_fit = max(fitnesses)
-        avg_fit = np.mean(fitnesses)
-        std_fit = np.std(fitnesses)
-
-        max_fit_list.append(max_fit)
-        avg_fit_list.append(avg_fit)
-        std_fit_list.append(std_fit)
-
         max_score = max(scores)
         avg_score = np.mean(scores)
         std_score = np.std(scores)
@@ -316,9 +267,6 @@ def main(seed, seed_number):
         max_score_list.append(max_score)
         avg_score_list.append(avg_score)
         std_score_list.append(std_score)
-
-        #embeddings_per_generation_list.append(solutions)
-        #fitnesses_per_generation_list.append(fitnesses)
 
         best_embeddings_list.append(es.result.xbest)
 
@@ -367,9 +315,6 @@ def main(seed, seed_number):
         # Save the metrics
         results = pd.DataFrame({
             "generation": list(range(0, generation + 1)),
-            "avg_fitness": avg_fit_list,
-            "std_fitness": std_fit_list,
-            "max_fitness": max_fit_list,
             "avg_score": avg_score_list,
             "std_score": std_score_list,
             "max_score": max_score_list,
@@ -393,7 +338,7 @@ def main(seed, seed_number):
         best_embeddings_json = [json.dumps(embedding.tolist()) for embedding in best_embeddings_list]
         results_best = pd.DataFrame({
             "generation": list(range(0, generation + 1)),
-            "max_fitness": max_fit_list,
+            "max_score": max_score_list,
             "best_embeddings": best_embeddings_json
         })
 
@@ -403,7 +348,7 @@ def main(seed, seed_number):
         save_plot_results(results, results_folder)
 
         # Print stats
-        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max fitness: {max_fit}, Avg fitness: {avg_fit}, Max score: {max_score}, Avg score: {avg_score}, Estimated time remaining: {formatted_time_remaining}")
+        print(f"Seed {seed_number} Generation {generation}/{NUM_GENERATIONS}: Max score: {max_score}, Avg score: {avg_score}, Estimated time remaining: {formatted_time_remaining}")
 
     # Save the overall best image
     with torch.no_grad():
@@ -427,16 +372,6 @@ def plot_mean_std(x_axis, m_vec, std_vec, description, title=None, y_label=None,
         plt.xlabel(x_label)
 
 def save_plot_results(results, results_folder):
-    plt.figure()
-    plot_mean_std(results['generation'], results['avg_fitness'], results['std_fitness'], "Population")
-    plt.plot(results['generation'], results['max_fitness'], 'r-', label="Best")
-    plt.ylim(0, 3.5)
-    plt.xlabel('Generation')
-    plt.ylabel('Fitness')
-    plt.grid()
-    plt.legend()
-    plt.savefig(results_folder + "/fitness_evolution.png")
-
     plt.figure()
     plot_mean_std(results['generation'], results['avg_score'], results['std_score'], "Population")
     plt.plot(results['generation'], results['max_score'], 'r-', label="Best")
